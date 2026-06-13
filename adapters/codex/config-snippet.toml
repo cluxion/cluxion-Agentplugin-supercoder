@@ -1,0 +1,6 @@
+# Codex 연동 참고 — 연결된 AI가 supercoder 도구/CLI 사용
+# Hermes: hermes plugins enable cluxion-agentplugin-supercoder
+# Skill 규칙: adapters/claude/skills/supercoder/SKILL.md 와 동일
+
+# 코딩 task 시:
+#   supercoder_plan → read_window → patch (hash) → test (host terminal) → brief
