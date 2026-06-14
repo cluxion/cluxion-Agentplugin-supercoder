@@ -93,13 +93,16 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
         return ToolResult(False, {"error": gate.reason})
     target = root / rel
     old_text = str(payload.get("old_text", ""))
-    original_text = target.read_text(encoding="utf-8") if target.exists() else None
-    result = apply_patch(
-        target,
-        old_text=old_text,
-        new_text=str(payload.get("new_text", "")),
-        expected_file_hash=str(payload.get("expected_file_hash", "")),
-    )
+    try:
+        original_text = target.read_text(encoding="utf-8") if target.exists() else None
+        result = apply_patch(
+            target,
+            old_text=old_text,
+            new_text=str(payload.get("new_text", "")),
+            expected_file_hash=str(payload.get("expected_file_hash", "")),
+        )
+    except UnicodeDecodeError as exc:
+        return ToolResult(False, {"error": f"file is not valid UTF-8: {exc}"})
     body: dict[str, object] = {
         "file_path": result.file_path,
         "strategy": result.strategy,

@@ -57,12 +57,13 @@ def scan_repo(
         "extensions": list(extensions),
     }
     backend = resolve_backend()
-    if backend == "native":
-        result = _invoke_native("scan", payload)
-    elif backend == "subprocess":
-        result = _invoke_subprocess("scan", payload)
-    else:
+    if backend == "python":
         result = _py_scan(root, max_files=max_files, extensions=extensions)
+    else:
+        try:
+            result = _invoke_native("scan", payload) if backend == "native" else _invoke_subprocess("scan", payload)
+        except Exception:
+            result = _py_scan(root, max_files=max_files, extensions=extensions)
     entries = result.get("entries")
     return entries if isinstance(entries, list) else []
 
@@ -71,10 +72,7 @@ def _invoke_native(command: str, payload: dict[str, object]) -> dict[str, object
     if _native is None:
         raise RuntimeError("native backend forced but supercoder_index_native is not importable")
     raw = _native.run(command, json.dumps(payload, ensure_ascii=False))
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise RuntimeError(f"supercoder-index {command} returned non-object JSON")
-    return parsed
+    return _parse_backend_json(raw, command)
 
 
 def _invoke_subprocess(command: str, payload: dict[str, object]) -> dict[str, object]:
@@ -95,7 +93,15 @@ def _invoke_subprocess(command: str, payload: dict[str, object]) -> dict[str, ob
         except (json.JSONDecodeError, AttributeError):
             error = ""
         raise RuntimeError(error or completed.stderr.strip() or f"supercoder-index {command} failed")
-    parsed = json.loads(completed.stdout)
+    parsed = _parse_backend_json(completed.stdout, command)
+    return parsed
+
+
+def _parse_backend_json(raw: str, command: str) -> dict[str, object]:
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise RuntimeError(f"supercoder-index {command} returned invalid JSON") from exc
     if not isinstance(parsed, dict):
         raise RuntimeError(f"supercoder-index {command} returned non-object JSON")
     return parsed
