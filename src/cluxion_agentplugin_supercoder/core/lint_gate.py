@@ -46,7 +46,9 @@ def _discover_ruff() -> str | None:
 
 def check_file(path: str | Path, *, cwd: str | Path | None = None) -> dict[str, Any]:
     """Lint one file and return structured advisory findings."""
-    target = Path(path)
+    target = Path(path).resolve()
+    if target.is_dir():
+        return {"ok": False, "error": "path is a directory"}
     language = language_for_path(target)
     if language not in LINTABLE_LANGUAGES:
         return _unchecked(language or "", "no_linter")

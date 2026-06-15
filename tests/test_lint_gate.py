@@ -95,3 +95,16 @@ def test_lint_gate_tool(tmp_path: Path) -> None:
     assert result.ok is True
     assert result.payload["clean"] is False
     assert result.payload["finding_count"] >= 1
+
+
+def test_lint_gate_rejects_directory(tmp_path: Path) -> None:
+    d = tmp_path / "emptydir"
+    d.mkdir()
+    result = lint_gate.check_file(d)
+    assert result.get("ok") is False
+    assert result.get("error") == "path is a directory"
+
+    # also via runner tool
+    res_tool = runner.lint_gate_tool({"cwd": str(tmp_path), "path": "emptydir"})
+    assert res_tool.ok is False
+    assert res_tool.payload.get("error") == "path is a directory"

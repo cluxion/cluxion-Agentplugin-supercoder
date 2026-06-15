@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from cluxion_agentplugin_supercoder import runner
 from cluxion_agentplugin_supercoder.core.test_gate import suggest_test_commands
@@ -116,6 +116,7 @@ def register(ctx: object) -> None:
 
 def _wrap(callback: Callable[[dict[str, object]], runner.ToolResult]) -> Callable[[dict[str, object]], str]:
     def handler(args: dict[str, object], **_: object) -> str:
+        args = args if isinstance(args, Mapping) else {}
         try:
             return callback(args).to_json()
         except (ValueError, TypeError, OSError) as exc:

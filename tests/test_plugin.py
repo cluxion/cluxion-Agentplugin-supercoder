@@ -1,3 +1,5 @@
+"""Tests for plugin registration and _wrap error handling."""
+
 from __future__ import annotations
 
 import json
@@ -5,18 +7,15 @@ import json
 from cluxion_agentplugin_supercoder import plugin, runner
 
 
-class FakeContext:
-    def __init__(self) -> None:
-        self.tools: dict[str, dict[str, object]] = {}
+def test_register_exposes_all_tools() -> None:
+    class FakeCtx:
+        def __init__(self):
+            self.tools = {}
 
-    def register_tool(
-        self, *, name: str, toolset: str, schema: dict[str, object], handler: object, emoji: str = ""
-    ) -> None:
-        self.tools[name] = {"toolset": toolset, "schema": schema, "handler": handler, "emoji": emoji}
+        def register_tool(self, name, toolset=None, schema=None, handler=None, emoji=None):
+            self.tools[name] = {"toolset": toolset, "schema": schema}
 
-
-def test_register_tools() -> None:
-    ctx = FakeContext()
+    ctx = FakeCtx()
     plugin.register(ctx)
     assert sorted(ctx.tools) == [
         "supercoder_brief",
@@ -44,6 +43,19 @@ def test_wrap_catches_isadirectory_and_typeerror() -> None:
     assert res_dir == {"ok": False, "error": "path is a directory"}
     res_type = json.loads(wrapped({}))
     assert res_type == {"ok": False, "error": "bad int coercion"}
+
+
+def test_wrap_coerces_none_args_to_clean_error() -> None:
+    def any_handler(args):
+        # if args was None, before fix: AttributeError on .get inside tools
+        # now coerced to {}, so callback runs and may raise ValueError for missing keys
+        if not args:
+            raise ValueError("args required after coercion")
+        return runner.ToolResult(True, {"echo": args})
+
+    wrapped = plugin._wrap(any_handler)
+    res = json.loads(wrapped(None))
+    assert res == {"ok": False, "error": "args required after coercion"}
 
 
 def test_repo_map_deterministic(tmp_path) -> None:
