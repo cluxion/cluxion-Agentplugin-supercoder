@@ -75,11 +75,12 @@ def register(ctx: object) -> None:
         name="supercoder_brief", toolset="supercoder", schema=BRIEF_SCHEMA, handler=_handle_brief, emoji="📋"
     )
     # doctor tool registration (additive)
-    from cluxion_agentplugin_supercoder.doctor import render_json, run_doctor
-    from cluxion_agentplugin_supercoder.doctor.probes import PROBES
     from importlib.resources import files
     from pathlib import Path
+
     from cluxion_agentplugin_supercoder import __version__
+    from cluxion_agentplugin_supercoder.doctor import render_json, run_doctor
+    from cluxion_agentplugin_supercoder.doctor.probes import PROBES
 
     def _handle_supercoder_doctor(args: dict[str, object], **_: object) -> str:
         try:

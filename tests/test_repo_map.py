@@ -175,6 +175,7 @@ def test_second_build_reuses_outline_cache(backend: str, sample_repo: Path, monk
     calls["count"] = 0
     second = repo_map.build_repo_map(sample_repo)
     assert calls["count"] == 0
+    assert first == second
 
 
 def test_changed_file_invalidates_outline_cache(
@@ -206,3 +207,4 @@ def test_identical_rewrite_keeps_outline_cache(
     calls["count"] = 0
     result = repo_map.build_repo_map(sample_repo)
     assert calls["count"] == 0
+    assert "map" in result
