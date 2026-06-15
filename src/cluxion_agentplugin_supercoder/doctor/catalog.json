@@ -1,0 +1,498 @@
+[
+  {
+    "check_id": "hermes_on_path",
+    "category": "hermes_contract",
+    "severity": "critical",
+    "what_it_checks": "hermes binary is resolvable on PATH",
+    "failure_symptom": "All tool/subprocess calls to the host fail immediately",
+    "likely_causes": [
+      "Hermes not installed",
+      "PATH not exported in this shell/agent env"
+    ],
+    "fix_steps": [
+      "Run: which hermes",
+      "If missing, install/repair Hermes Agent and ensure its bin dir is on PATH",
+      "For agents, confirm the spawned shell inherits PATH"
+    ],
+    "change_robust": "Uses shutil.which at runtime — independent of any hardcoded path",
+    "detection_method": "shutil.which(ctx.hermes_bin) is not None"
+  },
+  {
+    "check_id": "hermes_version",
+    "category": "hermes_contract",
+    "severity": "high",
+    "what_it_checks": "hermes --version is parseable (host is a known-good build)",
+    "failure_symptom": "Unknown host version; contract assumptions may not hold",
+    "likely_causes": [
+      "Hermes build does not print the expected banner",
+      "Broken install"
+    ],
+    "fix_steps": [
+      "Run: hermes --version",
+      "Reinstall Hermes if the version banner is missing"
+    ],
+    "change_robust": "Parses live --version output, not a pinned constant",
+    "detection_method": "regex 'Hermes Agent v<ver>' matches `hermes --version`"
+  },
+  {
+    "check_id": "hermes_oneshot_flag",
+    "category": "hermes_contract",
+    "severity": "critical",
+    "what_it_checks": "host advertises -z/--oneshot (the non-interactive entry every plugin relies on)",
+    "failure_symptom": "Plugin/CLI falls into interactive mode or errors when invoking the host",
+    "likely_causes": [
+      "A Hermes update renamed/removed the oneshot flag"
+    ],
+    "fix_steps": [
+      "Run: hermes --help | grep -- -z",
+      "If absent, pin to a compatible Hermes version or update the plugin to the new flag"
+    ],
+    "change_robust": "Greps live --help output each run — detects a Hermes update that breaks the contract",
+    "detection_method": "'-z' and '--oneshot' present in `hermes --help`"
+  },
+  {
+    "check_id": "entry_point_registered",
+    "category": "registration",
+    "severity": "critical",
+    "what_it_checks": "this plugin's entry point is registered under hermes_agent.plugins and import+register() works",
+    "failure_symptom": "Plugin not loaded by Hermes; its tools/subcommand are absent",
+    "likely_causes": [
+      "pip install incomplete",
+      "entry point metadata missing",
+      "register() import error"
+    ],
+    "fix_steps": [
+      "Run: python -c \"import importlib.metadata as m; print([e.value for e in m.entry_points(group='hermes_agent.plugins') if 'cluxion-agentplugin-supercoder' in e.name.lower()])\"",
+      "Reinstall: pip install --force-reinstall cluxion-agentplugin-supercoder",
+      "Confirm the entry module imports and exposes a callable register"
+    ],
+    "change_robust": "Reads live importlib.metadata.entry_points(), not a config file",
+    "detection_method": "entry_points(group='hermes_agent.plugins') contains this dist and register is callable"
+  },
+  {
+    "check_id": "toolset_valid",
+    "category": "contract_drift",
+    "severity": "high",
+    "what_it_checks": "this plugin's toolset 'supercoder' is listed and enabled by `hermes tools list`",
+    "failure_symptom": "Model cannot see this plugin's tools; --toolsets silently ignores it",
+    "likely_causes": [
+      "Plugin failed to register its toolset",
+      "Hermes toolset registration API changed"
+    ],
+    "fix_steps": [
+      "Run: hermes tools list | grep supercoder",
+      "If missing, reinstall cluxion-agentplugin-supercoder and restart the host",
+      "Verify register_tool used a valid toolset name"
+    ],
+    "change_robust": "Queries live `hermes tools list` for 'supercoder' — catches contract drift on Hermes upgrade",
+    "detection_method": "'supercoder' appears under plugin toolsets in `hermes tools list`"
+  },
+  {
+    "check_id": "install_integrity",
+    "category": "install",
+    "severity": "high",
+    "what_it_checks": "installed distribution version equals the package __version__",
+    "failure_symptom": "Stale or mismatched install; fixes/behaviors may not be the deployed ones",
+    "likely_causes": [
+      "Partial upgrade",
+      "multiple installs shadowing each other"
+    ],
+    "fix_steps": [
+      "Run: pip show cluxion-agentplugin-supercoder",
+      "Force a clean reinstall: pip install --force-reinstall cluxion-agentplugin-supercoder"
+    ],
+    "change_robust": "Compares live importlib.metadata.version() to __version__ — no hardcoding",
+    "detection_method": "importlib.metadata.version('cluxion-agentplugin-supercoder') == __version__"
+  },
+  {
+    "check_id": "native_module_importable",
+    "category": "native_backend",
+    "severity": "medium",
+    "what_it_checks": "native module supercoder_index_native imports (else pure-Python/subprocess fallback is used)",
+    "failure_symptom": "Slower path; if fallback also broke, tool errors",
+    "likely_causes": [
+      "wheel ABI/arch mismatch",
+      "native package not installed"
+    ],
+    "fix_steps": [
+      "Run: python -c 'import supercoder_index_native'",
+      "If ImportError, reinstall the bundled wheel; fallback keeps working meanwhile"
+    ],
+    "change_robust": "Attempts the import + hasattr at runtime; WARN (not fail) because fallback works",
+    "detection_method": "import supercoder_index_native succeeds"
+  },
+  {
+    "check_id": "handler_exception_coverage",
+    "category": "handler",
+    "severity": "medium",
+    "what_it_checks": "_wrap catches OSError/TypeError (IsADirectoryError, bad numeric args) → error JSON, never raises to host",
+    "failure_symptom": "Traceback escapes into the Hermes host on a directory path or non-numeric arg",
+    "likely_causes": [
+      "_wrap only caught (ValueError, FileNotFoundError, PermissionError)"
+    ],
+    "fix_steps": [
+      "Broaden _wrap except to (ValueError, TypeError, OSError)",
+      "Coerce payload ints defensively in runner.py"
+    ],
+    "change_robust": "Invokes a handler with a directory path / non-numeric arg and asserts error JSON",
+    "detection_method": "handler raising IsADirectoryError/TypeError yields {ok:false,...}"
+  },
+  {
+    "check_id": "repo_map_deterministic",
+    "category": "data",
+    "severity": "low",
+    "what_it_checks": "supercoder_repo_map core output is byte-identical across two identical calls (cache stats isolated under _stats)",
+    "failure_symptom": "Two identical calls differ (outline_cache_hits 0 vs >0) — non-deterministic",
+    "likely_causes": [
+      "observability counter mixed into the main payload"
+    ],
+    "fix_steps": [
+      "Move cache/observability counters under a _stats key or drop from payload"
+    ],
+    "change_robust": "Compares two consecutive call outputs for byte-equality",
+    "detection_method": "two identical repo_map calls produce equal payloads (ignoring _stats)"
+  },
+  {
+    "check_id": "ruff_binary_discoverable",
+    "category": "install",
+    "severity": "medium",
+    "what_it_checks": "Whether the ruff linter binary can be found for the lint gate. Resolves in order: env override (CLUXION_SUPERCODER_RUFF_BIN), venv sibling, PATH.",
+    "failure_symptom": "Lint gate returns checked=False with reason 'no_tool'. Python files pass patches without lint advisory findings.",
+    "likely_causes": [
+      "ruff package installed in Python but binary not in venv/bin (Python-only wheel without CLI)",
+      "CLUXION_SUPERCODER_RUFF_BIN env var points to nonexistent path",
+      "ruff not in PATH and not in venv sibling location (venv/bin/ruff)",
+      "Wrong Python venv activated (ruff in wrong venv's bin/)"
+    ],
+    "fix_steps": [
+      "Verify ruff is installed: pip list | grep ruff (should be >=0.8 per pyproject.toml)",
+      "Check if binary exists: ls -la /path/to/venv/bin/ruff",
+      "If missing, reinstall ruff with pip install --force-reinstall 'ruff>=0.8'",
+      "Verify it works: which ruff or /path/to/venv/bin/ruff --version",
+      "If using env override, unset the var or point it to the correct binary: unset CLUXION_SUPERCODER_RUFF_BIN"
+    ],
+    "change_robust": "Call lint_gate.ruff_bin() which probes the actual resolution chain. Never hardcode PATH or venv location; the function adapts to env.",
+    "detection_method": "Call: python -c \"from cluxion_agentplugin_supercoder.core.lint_gate import ruff_bin; print(ruff_bin())\" — prints path if found, None if missing."
+  },
+  {
+    "check_id": "backend_chain_operational",
+    "category": "native_backend",
+    "severity": "high",
+    "what_it_checks": "Whether at least one of the three index backends (native, subprocess, python) can successfully scan a repo. The python tier always works as a fallback, but native and subprocess may fail if not installed/available.",
+    "failure_symptom": "Repo map and cursor map operations fail with RuntimeError. Patch operations fail to detect file hashes. Index-heavy operations timeout or crash.",
+    "likely_causes": [
+      "Native module present but corrupted or incompatible Rust code",
+      "Subprocess binary (supercoder-index) not in PATH and CLUXION_SUPERCODER_INDEX_BIN not set",
+      "Subprocess binary exists but crashes on certain file encodings or repo structures",
+      "Python tier encounters UnicodeDecodeError on non-UTF-8 files (python tier skips them gracefully, native may crash)"
+    ],
+    "fix_steps": [
+      "Test resolution: python -c \"from cluxion_agentplugin_supercoder.rust_bridge import resolve_backend; print(resolve_backend())\"",
+      "Force python-only mode for debugging: export CLUXION_SUPERCODER_BACKEND=python",
+      "Test scan on a small, clean repo: python -c \"from cluxion_agentplugin_supercoder.rust_bridge import scan_repo; from pathlib import Path; print(scan_repo(Path('.'), max_files=5))\"",
+      "If native is broken, try subprocess: export CLUXION_SUPERCODER_BACKEND=subprocess and verify the binary exists",
+      "Check for non-UTF-8 files in the repo that might crash native: find . -type f -exec file {} \\; | grep -v UTF",
+      "If all else fails, use python-only: export CLUXION_SUPERCODER_BACKEND=python (slow but reliable)"
+    ],
+    "change_robust": "Detect via resolve_backend() function which polls all three tiers. Use env override to force a specific backend for testing. Probe with small test repo (max_files=1) to isolate the issue.",
+    "detection_method": "Call: rust_bridge.scan_repo(Path('.'), max_files=1) — must return list with at least one entry or gracefully fall back to python tier. Check logs for backend resolution: python -c \"from cluxion_agentplugin_supercoder.rust_bridge import resolve_backend; print(resolve_backend())\"."
+  },
+  {
+    "check_id": "subprocess_binary_present",
+    "category": "native_backend",
+    "severity": "low",
+    "what_it_checks": "Whether the supercoder-index subprocess binary is available if native module is not. This is the second-tier backend for repo scanning when the native Rust extension is unavailable.",
+    "failure_symptom": "scan_repo falls back to python tier (slow). If native module is also missing, repo_map and repo scanning are slow but functional.",
+    "likely_causes": [
+      "Rust binary not built or not installed in PATH",
+      "CLUXION_SUPERCODER_INDEX_BIN env var not set and binary not in project's rust/supercoder_index/target/release/",
+      "Binary exists but is for a different OS/architecture (e.g., linux binary on macos)"
+    ],
+    "fix_steps": [
+      "Check if binary exists in expected locations: ls -la /path/to/project/rust/supercoder_index/target/release/supercoder-index",
+      "If not, build it: cd rust/supercoder_index && cargo build --release",
+      "Verify it works: supercoder-index --help or /path/to/supercoder-index scan --help",
+      "If not in PATH, set env var: export CLUXION_SUPERCODER_INDEX_BIN=/full/path/to/supercoder-index",
+      "Confirm with: python -c \"from cluxion_agentplugin_supercoder.rust_bridge import resolve_backend; print(resolve_backend())\" (should show 'subprocess' or 'native')"
+    ],
+    "change_robust": "Python tier is always available as fallback. Detect subprocess binary via shutil.which() and env var. Test resolution chain with resolve_backend().",
+    "detection_method": "Call: shutil.which('supercoder-index') or check env CLUXION_SUPERCODER_INDEX_BIN. Also: python -c \"import os; from pathlib import Path; configured = os.environ.get('CLUXION_SUPERCODER_INDEX_BIN', '').strip(); print('Binary at:', configured if configured else 'not set'); print('Exists:', Path(configured).exists() if configured else False)\"."
+  },
+  {
+    "check_id": "file_hash_consistency",
+    "category": "hermes_contract",
+    "severity": "high",
+    "what_it_checks": "Whether file_hash() function produces stable, deterministic SHA256 hashes across different reads and byte representations (CRLF normalization, UTF-8 consistency).",
+    "failure_symptom": "Patch operations report hash mismatch (stale_file) even when the file content has not changed (false positives). Expected file hash and matched hash diverge for Windows line endings.",
+    "likely_causes": [
+      "File read inconsistency: reading with different encodings or line-ending handling",
+      "Git line-ending conversions (core.safecrlf or auto-CRLF) alter file on disk between reads",
+      "hash_patch.py not normalizing CRLF to LF before hashing",
+      "Cursor created on one OS (e.g., Windows) used on another (Linux) with different line endings"
+    ],
+    "fix_steps": [
+      "Check file_hash implementation: grep -A5 'def file_hash' src/cluxion_agentplugin_supercoder/core/hash_patch.py — should call _normalize_newlines",
+      "Verify normalization: python -c \"from cluxion_agentplugin_supercoder.core.hash_patch import _normalize_newlines; print(repr(_normalize_newlines('a\\\\r\\\\nb')))\" (should output 'a\\\\nb')",
+      "Check git line-ending config: git config core.autocrlf (should be false or input for stability)",
+      "Re-read file hash fresh: python -c \"from cluxion_agentplugin_supercoder.core.cursor import read_window; from pathlib import Path; w = read_window(Path('.'), 'file.py'); print('File hash:', w.file_hash)\"",
+      "If mismatch persists, use expected_file_hash='' to force fuzzy match or re-read with read_window to get fresh hash"
+    ],
+    "change_robust": "Test file_hash() directly with various line ending styles. Verify _normalize_newlines is called in apply_patch(). Check that cursor.read_window() uses the same normalization.",
+    "detection_method": "Read a file twice, normalize CRLF, and verify hashes match: python -c \"from cluxion_agentplugin_supercoder.core.hash_patch import file_hash; content = 'a=1\\\\r\\\\nb=2\\\\r\\\\n'; h1 = file_hash(content); h2 = file_hash(content.replace('\\\\r\\\\n', '\\\\n')); print('Match:', h1 == h2)\"."
+  },
+  {
+    "check_id": "patch_cursor_validity",
+    "category": "data",
+    "severity": "critical",
+    "what_it_checks": "Whether the expected_file_hash cursor parameter is correctly capturing the file state at read time and is still valid when patch is applied.",
+    "failure_symptom": "Patches apply to stale file content and modify the wrong code (silent data corruption). No stale_file error is reported when file changed between cursor creation and patch attempt.",
+    "likely_causes": [
+      "expected_file_hash not passed to patch_tool (cursor not verified)",
+      "File modified by external process (another editor, git operation, build script) between read_window and patch_tool calls",
+      "Concurrent edits in multi-agent scenarios without cursor synchronization",
+      "Hash_patch.py not comparing expected_file_hash with current file hash"
+    ],
+    "fix_steps": [
+      "Always pass expected_file_hash from read_window result to patch_tool: patch_tool({..., 'expected_file_hash': window.file_hash, ...})",
+      "Before patching, re-read the file: read_window again to get fresh file_hash and verify no external changes",
+      "Check that apply_patch validates hash: grep -B2 -A5 'if expected_file_hash and current_hash' src/cluxion_agentplugin_supercoder/core/hash_patch.py",
+      "If file was modified externally, re-read and rebuild the patch from the current content",
+      "For multi-agent setups, use locks or cursors with timestamps to detect concurrent modifications"
+    ],
+    "change_robust": "Test by modifying file between read and patch. Verify apply_patch() calls _normalize_hash() and compares with current_hash. Ensure expected_file_hash parameter is mandatory in patch workflows.",
+    "detection_method": "Read a file with read_window, record the file_hash, modify the file externally, then attempt patch with the old hash. Should fail with stale_file. Command: python -c \"from cluxion_agentplugin_supercoder.core.cursor import read_window; from cluxion_agentplugin_supercoder import runner; from pathlib import Path; (Path('/tmp/t.py').write_text('x=1'); w = read_window(Path('.'), 't.py'); Path('/tmp/t.py').write_text('x=2'); r = runner.patch_tool({'cwd': '/tmp', 'path': 't.py', 'old_text': 'x=1', 'new_text': 'x=3', 'expected_file_hash': w.file_hash}); print('Blocked:', not r.ok))\"."
+  },
+  {
+    "check_id": "syntax_gate_parser_available",
+    "category": "native_backend",
+    "severity": "high",
+    "what_it_checks": "Whether the syntax gate can parse the target language. Native and subprocess tiers support python/rust/js/ts/tsx/json via tree-sitter; python tier supports only python/json/toml via stdlib. Fail-open: unknown languages report checked=False and valid=True.",
+    "failure_symptom": "Patches with broken syntax pass the gate when they should be reverted. Invalid Rust/JS/TS code applies without error. Syntax errors not caught, code compiles/runs incorrectly.",
+    "likely_causes": [
+      "Python backend in use (CLUXION_SUPERCODER_BACKEND=python) but code is Rust/JS/TS — these languages not supported by python tier",
+      "Native module missing/broken — reverts to slower python tier which cannot parse compiled languages",
+      "Parser grammar for a language is outdated or missing in tree-sitter bindings",
+      "File encoding or content format incompatible with parser (e.g., minified JS)"
+    ],
+    "fix_steps": [
+      "Check backend in use: python -c \"from cluxion_agentplugin_supercoder.rust_bridge import resolve_backend; print(resolve_backend())\"",
+      "Test syntax check directly: python -c \"from cluxion_agentplugin_supercoder.core.syntax_gate import check_source; r = check_source(content='<your code>', language='rust'); print('Checked:', r['checked'], 'Valid:', r['valid'])\"",
+      "For Rust/JS/TS support, ensure native or subprocess backend is available; if not, syntax gate falls back to fail-open (no check) and patches always pass",
+      "Disable syntax_gate in patch_tool if false positives occur: patch_tool({..., 'syntax_gate': False, ...})",
+      "Check for encoding issues: file encoding must be UTF-8; non-UTF-8 files fail at read time before syntax gate is invoked"
+    ],
+    "change_robust": "Detect via check_source() call with known good/broken code. Verify backend supports target language. Test all three backends (native, subprocess, python) to understand fallback behavior.",
+    "detection_method": "Call syntax_gate.check_source() with various languages and backends. Test python: python -c \"from cluxion_agentplugin_supercoder.core.syntax_gate import check_source; print(check_source(content='def f(): pass', language='python'))\" — should have checked=True. Test rust with python backend: export CLUXION_SUPERCODER_BACKEND=python && python -c \"from cluxion_agentplugin_supercoder.core.syntax_gate import check_source; r = check_source(content='fn f() {}', language='rust'); print('Checked:', r['checked'])\" — should be False."
+  },
+  {
+    "check_id": "utf8_file_readability",
+    "category": "install",
+    "severity": "medium",
+    "what_it_checks": "Whether files in the workspace are valid UTF-8. patch_tool, read_window, and cursor_map all call .read_text(encoding='utf-8') which fails on non-UTF-8 files.",
+    "failure_symptom": "patch_tool, read_window, cursor_map, and repo_map fail with UnicodeDecodeError. Operations on affected files are completely blocked.",
+    "likely_causes": [
+      "Legacy files with Latin-1, CP1252, or other non-UTF-8 encodings",
+      "Binary files (images, compiled objects) with code extensions (.py, .rs, etc.) mixed in",
+      "Git check-in of files with wrong encoding",
+      "External tools generating non-UTF-8 output into repo"
+    ],
+    "fix_steps": [
+      "Identify non-UTF-8 files: file * or hexdump -C <file> | head to inspect byte sequences",
+      "Convert to UTF-8: iconv -f CP1252 -t UTF-8 <file> -o <file>.utf8 && mv <file>.utf8 <file> or python -c \"open('file', 'rb').read().decode('latin-1').encode('utf-8')\"",
+      "Exclude binaries from scanning: Check .gitignore and rust_bridge.SKIP_DIRS (node_modules, dist, target) are respected",
+      "If file cannot be converted, exclude it from the workspace or move it outside the repo root",
+      "Re-test: patch_tool and read_window should now succeed on UTF-8 files"
+    ],
+    "change_robust": "Detect via file command or Python's .read_text(encoding='utf-8'). Scan entire workspace to find all affected files. The error message includes the byte offset of the invalid sequence.",
+    "detection_method": "Scan for non-UTF-8 files: find . -type f ! -name '*.bin' -exec sh -c 'file \"$1\" | grep -v UTF' _ {} \\; or python -c \"from pathlib import Path; [print(p) for p in Path('.').rglob('*') if p.is_file() and not str(p).startswith('.')]; import sys; for p in sys.argv[1:]: Path(p).read_text(encoding='utf-8')\" /path/files."
+  },
+  {
+    "check_id": "repo_map_budget_integrity",
+    "category": "resource",
+    "severity": "high",
+    "what_it_checks": "Whether repo_map honors the character budget contract: files beyond the budget are omitted but counted, never silently dropped. Truncated flag is set when omitted > 0.",
+    "failure_symptom": "Model receives incomplete repo map without warning. Files are silently dropped, model doesn't know they exist. Truncated=False when files_omitted > 0 (contract violation).",
+    "likely_causes": [
+      "repo_map.py logic skips files without incrementing files_omitted counter",
+      "Budget is not enforced consistently (some files counted, others not)",
+      "truncated flag set to False when files were actually dropped",
+      "Symbol capping doesn't match file capping logic (files included but symbols omitted inconsistently)"
+    ],
+    "fix_steps": [
+      "Check repo_map.py build_repo_map() logic: grep -A30 'def build_repo_map' and verify 'files_omitted' counter is incremented when budget is exhausted",
+      "Verify contract: python -c \"assert result['files_mapped'] + result['files_omitted'] == result['files_scanned']\"",
+      "Check truncated flag: if files_omitted > 0, truncated must be True; if files_omitted == 0, truncated must be False",
+      "Test with tiny budget: build_repo_map(repo, budget_chars=200) and verify at least one file is omitted",
+      "Read the map text to confirm visual consistency: print(result['map']) should show only included files"
+    ],
+    "change_robust": "Build repo map on real repo with various budgets and verify the formula: files_mapped + files_omitted == files_scanned. Check truncated flag in every build. The logic is deterministic; test with fixtures.",
+    "detection_method": "Build repo map with small budget and verify files_mapped + files_omitted == files_scanned and truncated reflects overflow: python -c \"from cluxion_agentplugin_supercoder.core.repo_map import build_repo_map; from pathlib import Path; r = build_repo_map(Path('.'), budget_chars=200); print('Mapped:', r['files_mapped'], 'Omitted:', r['files_omitted'], 'Scanned:', r['files_scanned'], 'Truncated:', r['truncated'])\"."
+  },
+  {
+    "check_id": "lint_gate_availability_graceful",
+    "category": "runtime",
+    "severity": "low",
+    "what_it_checks": "Whether lint_gate.check_file() gracefully handles missing ruff and returns checked=False (suggest-only, never blocks patches).",
+    "failure_symptom": "Patch fails when ruff is not available (checked=True with error). Lint findings block patches or cause tool crashes.",
+    "likely_causes": [
+      "lint_gate.py does not catch OSError/RuntimeError from subprocess call",
+      "patch_tool treats lint failures as fatal instead of advisory",
+      "Lint gate not wrapped with try-except in runner.patch_tool()"
+    ],
+    "fix_steps": [
+      "Verify lint_gate returns ok=True with checked=False when ruff is missing: check_file() should never raise",
+      "Check runner.patch_tool line ~130: lint gate is after syntax gate and only when result.success is True",
+      "Confirm patch succeeds even without lint: patch_tool should return ok=True regardless of lint findings",
+      "Test: disable lint with patch_tool(..., 'lint_gate': False) — patch should apply without invoking lint",
+      "If lint gate crashes, wrap it with try-except in runner.patch_tool or disable it per-call"
+    ],
+    "change_robust": "Test by making ruff unavailable and calling patch_tool. Verify result.ok is still True and lint key is present (or absent if disabled). Lint should never cause patch failure.",
+    "detection_method": "Force ruff to be unavailable and lint a python file: python -c \"import os; os.environ['CLUXION_SUPERCODER_RUFF_BIN'] = '/nonexistent'; from cluxion_agentplugin_supercoder.core.lint_gate import check_file; from pathlib import Path; r = check_file(Path('x.py'), cwd=Path('.')); print('Checked:', r['checked'], 'Reason:', r.get('reason'))\"."
+  },
+  {
+    "check_id": "concurrency_isolation",
+    "category": "concurrency",
+    "severity": "medium",
+    "what_it_checks": "Whether retry_loop state and repo_map outline cache are properly isolated when multiple agents or tasks run concurrently. These modules use in-process caches (OrderedDict) that are not thread-safe.",
+    "failure_symptom": "Retry guidance is lost or wrong (attempt counter resets, wrong file's state used). Outline cache evicts wrong entries. In multi-agent setups, one agent's cursor invalidates another's.",
+    "likely_causes": [
+      "retry_loop._failures dict is shared across threads without locks",
+      "repo_map._outline_cache is shared and not thread-safe for concurrent reads/writes",
+      "plugin.py registers tools without per-call isolation; all agents share plugin state",
+      "No workspace or task-id scoping in cache keys"
+    ],
+    "fix_steps": [
+      "Check if Hermes/plugin context is multi-threaded: review Hermes agent dispatch model (likely single-threaded per context)",
+      "If multi-threaded, add locks: import threading; _failures_lock = threading.Lock() in retry_loop.py",
+      "Test isolation: run two patch tasks in sequence (not parallel) and verify retry counters are correct",
+      "If concurrent agents share plugin process, reset retry_loop and repo_map state between tasks: call retry_loop.reset() and repo_map.clear_outline_cache()",
+      "Scope cache keys by task_id: prefix keys with (task_id, file_path) instead of just file_path"
+    ],
+    "change_robust": "Test by calling retry_loop functions from multiple threads (if Hermes is multi-threaded). Verify state is correct after concurrent calls. Check plugin invocation pattern in Hermes agent to understand threading model.",
+    "detection_method": "Call retry_loop.record_failure() and retry_loop.record_success() concurrently on the same file, or clear outline_cache concurrently. Check that state is not corrupted: python -c \"from cluxion_agentplugin_supercoder.core import retry_loop, repo_map; retry_loop.reset(); import threading; def worker(): retry_loop.record_failure('ws', 'f.py', 'test'); threads = [threading.Thread(target=worker) for _ in range(5)]; [t.start() for t in threads]; [t.join() for t in threads]; print('Done')\"."
+  },
+  {
+    "check_id": "hermes_contract_tool_registration",
+    "category": "hermes_contract",
+    "severity": "critical",
+    "what_it_checks": "Whether the plugin correctly registers 9 tools with Hermes via ctx.register_tool() in plugin.register(). Tools must have correct schemas, handlers, and emoji.",
+    "failure_symptom": "Tools not available in Hermes CLI. Tool calls fail with 'unknown tool' error. Schema validation rejects arguments.",
+    "likely_causes": [
+      "plugin.register() not called by Hermes entry point",
+      "Tool name mismatch between schema and runner function",
+      "Handler wrapping (_wrap) broken or missing",
+      "Schema JSON malformed or missing required fields"
+    ],
+    "fix_steps": [
+      "Verify plugin is registered: grep -r 'entry-points.*hermes_agent.plugins' pyproject.toml — should show cluxion-agentplugin-supercoder",
+      "Check registration: python -c \"from cluxion_agentplugin_supercoder.plugin import register; print('register function exists')\"",
+      "Test handler wrapping: python -c \"from cluxion_agentplugin_supercoder.plugin import _wrap; from cluxion_agentplugin_supercoder import runner; h = _wrap(runner.plan); print(h({'prompt': 'test', 'task_id': 't1'}))\"",
+      "Validate schemas: python -c \"from cluxion_agentplugin_supercoder.schemas import *; import json; print(json.dumps(PLAN_SCHEMA, indent=2))\"",
+      "Check Hermes loads plugin: cluxion-supercoder check — should return plugin=cluxion-agentplugin-supercoder"
+    ],
+    "change_robust": "Call register() with a mock Hermes context and verify all 9 tools are registered. Test each tool's handler via _wrap(). Validate schemas against JSON schema spec.",
+    "detection_method": "Check plugin.py register() function: grep -c 'ctx.register_tool' src/cluxion_agentplugin_supercoder/plugin.py — should be exactly 9 (plan, read_window, patch, cursor_map, syntax_gate, lint_gate, repo_map, test_gate, brief). Verify schemas match runners: grep SCHEMA src/cluxion_agentplugin_supercoder/schemas.py | wc -l — should be 9."
+  },
+  {
+    "check_id": "hermes_context_workspace_root",
+    "category": "hermes_contract",
+    "severity": "critical",
+    "what_it_checks": "Whether tools receive and correctly resolve the workspace root (cwd parameter) from Hermes. All tools must respect the workspace boundary and never escape it.",
+    "failure_symptom": "Tools read/write files outside the workspace (security breach). Path traversal attacks succeed. File operations leak data from parent directories.",
+    "likely_causes": [
+      "read_window() or patch_tool() not validating that resolved path is_relative_to workspace root",
+      "safety.py _path_gate() not called for all file operations",
+      "Path resolution using string prefix instead of is_relative_to() (allows /work vs /work2 confusion)"
+    ],
+    "fix_steps": [
+      "Check read_window() in cursor.py line ~33: if not str(path).startswith(str(root)) — should use is_relative_to() instead",
+      "Verify safety.py _path_gate() uses is_relative_to(): grep -A2 'is_relative_to' src/cluxion_agentplugin_supercoder/core/safety.py",
+      "Test path escape: read_window({..., 'path': '../../../etc/passwd'}) — should raise PermissionError",
+      "Test symlink escape: if workspace has symlink to /tmp, verify resolved path is still within workspace",
+      "Confirm all file operations go through safety gate: patch_tool, read_window, cursor_map all validate paths"
+    ],
+    "change_robust": "Test path escape attempts: ../../../etc/passwd, /etc/passwd, symlinks to parent. Verify is_relative_to() is used. Check that workspace is resolved before comparison.",
+    "detection_method": "Call tools with cwd parameter and verify path operations stay within bounds: python -c \"from cluxion_agentplugin_supercoder import runner; from pathlib import Path; result = runner.read_window_tool({'cwd': '/tmp', 'path': '../../../etc/passwd', 'start_line': 1}); print('Error:', result.payload.get('error'))\" — should raise PermissionError or return error, not read /etc/passwd."
+  },
+  {
+    "check_id": "json_error_handling_comprehensive",
+    "category": "runtime",
+    "severity": "high",
+    "what_it_checks": "Whether all runner functions (via _wrap) return valid JSON even on error, and whether exceptions are caught and serialized correctly.",
+    "failure_symptom": "Tool calls return invalid JSON or uncaught exceptions. Host agent crashes parsing response. Error messages are lost or truncated.",
+    "likely_causes": [
+      "_wrap() does not catch all exceptions (only ValueError, FileNotFoundError, PermissionError)",
+      "ToolResult.to_json() fails due to non-serializable objects in payload",
+      "Exceptions raised in runner functions escape _wrap() without being caught"
+    ],
+    "fix_steps": [
+      "Check _wrap in plugin.py lines ~79-86: it catches (ValueError, FileNotFoundError, PermissionError) and returns json.dumps with ok=False",
+      "Test error path: python -c \"from cluxion_agentplugin_supercoder.plugin import _wrap; from cluxion_agentplugin_supercoder import runner; h = _wrap(runner.read_window_tool); result = h({}); import json; j = json.loads(result); print('Error:', j.get('error'))\"",
+      "Add more exception types if needed: OSError, UnicodeDecodeError, KeyError, etc.",
+      "Verify ToolResult.to_json() handles all payload types: avoid dicts with non-serializable values (Path, set, etc.)",
+      "Test with broken runner call: force an exception and verify json output is valid"
+    ],
+    "change_robust": "Call _wrap(runner.function) with invalid inputs. Verify output is valid JSON. Parse json.loads(result) and check 'ok' and 'error' keys.",
+    "detection_method": "Call runner functions with invalid input and verify output is valid JSON: python -c \"from cluxion_agentplugin_supercoder.plugin import _wrap; from cluxion_agentplugin_supercoder import runner; h = _wrap(runner.read_window_tool); result = h({'cwd': '/nonexistent', 'path': 'x.py'}); import json; j = json.loads(result); print('ok' if 'ok' in j else 'invalid json')\"."
+  },
+  {
+    "check_id": "hermes_requirements_installed",
+    "category": "install",
+    "severity": "high",
+    "what_it_checks": "Whether runtime dependencies (psutil, PyYAML, ruff) specified in pyproject.toml are installed. These are not optional.",
+    "failure_symptom": "Import errors when plugin loads. psutil functions used in internal monitoring fail silently. YAML parsing (if used in config) crashes.",
+    "likely_causes": [
+      "pip install skipped the 'install' extras",
+      "Requirements installed in wrong venv",
+      "Version mismatch (old ruff version before 0.8)"
+    ],
+    "fix_steps": [
+      "Check installed: pip show psutil PyYAML ruff",
+      "Reinstall plugin with deps: pip install --force-reinstall cluxion-agentplugin-supercoder",
+      "Verify in correct venv: pip -V (should point to .hermes/hermes-agent/venv/bin/pip)",
+      "Check ruff version: ruff --version (should be >= 0.8 per pyproject.toml)",
+      "Test imports: python -c \"import psutil, yaml; print('ok')\""
+    ],
+    "change_robust": "Import directly and catch ImportError. Use pip list to verify versions match pyproject.toml requirements.",
+    "detection_method": "Try importing all: python -c \"import psutil; import yaml; import ruff; print('all installed')\" or pip list | grep -E '^(psutil|PyYAML|ruff)'."
+  },
+  {
+    "check_id": "stale_cursor_protection_enforced",
+    "category": "data",
+    "severity": "critical",
+    "what_it_checks": "Whether patch_tool correctly blocks patches when stale_cursor=True is passed, or when expected_file_hash mismatches (file changed after read_window).",
+    "failure_symptom": "Patches apply even when file changed after cursor was created. Silent data corruption due to stale cursor.",
+    "likely_causes": [
+      "safety.pre_tool_gate() not checking stale_cursor parameter",
+      "stale_cursor parameter ignored or not passed through"
+    ],
+    "fix_steps": [
+      "Check safety.py line ~33: if stale_cursor: return SafetyDecision('block', ...)\"",
+      "Verify patch_tool line ~91 calls pre_tool_gate with stale_cursor parameter",
+      "Test: call patch_tool with stale_cursor=True and verify result.ok is False",
+      "Test: call patch_tool with wrong expected_file_hash and verify stale_file error"
+    ],
+    "change_robust": "Test both stale_cursor=True (explicit flag) and hash mismatch (implicit stale detection). Verify both pathways return ok=False.",
+    "detection_method": "Call patch_tool with stale_cursor=True and verify result.ok is False: python -c \"from cluxion_agentplugin_supercoder import runner; r = runner.patch_tool({'cwd': '/tmp', 'path': 't.py', 'old_text': 'x', 'new_text': 'y', 'stale_cursor': True}); print('Blocked:', not r.ok, 'Reason:', r.payload.get('error'))\"."
+  },
+  {
+    "check_id": "path_security_secrets_blocked",
+    "category": "runtime",
+    "severity": "critical",
+    "what_it_checks": "Whether safety._path_gate() blocks access to files matching secret patterns (.env, id_rsa, credentials, secrets).",
+    "failure_symptom": "Patches apply to .env, credentials, secrets files. Sensitive data is modified. Secret keys are exposed in patch attempts.",
+    "likely_causes": [
+      "safety._path_gate() not checking against _SECRET_PARTS tuple",
+      "Path matching uses basename only (allows .env in subdir that should be blocked)"
+    ],
+    "fix_steps": [
+      "Check safety.py line ~23: _SECRET_PARTS = ('.env', 'id_rsa', 'credentials', 'secrets')",
+      "Verify line ~56: if any(part in resolved.parts for part in _SECRET_PARTS) — this blocks any path component matching",
+      "Test: try patch_tool on .env, id_rsa, credentials.json, secrets.yaml — all should return blocked",
+      "Test subdirs: .config/.env, subdir/credentials.json — all should be blocked",
+      "If false positives (e.g., secretsmanager.py blocked), refine secret pattern matching"
+    ],
+    "change_robust": "Test with files matching secret patterns in various locations. Verify in resolved.parts (all path components) not just basename.",
+    "detection_method": "Try to read/patch a .env file and verify it's blocked: python -c \"from cluxion_agentplugin_supercoder import runner; from pathlib import Path; (Path('/tmp/.env').write_text('KEY=secret')); r = runner.read_window_tool({'cwd': '/tmp', 'path': '.env'}); print('Blocked:', not r.ok, 'Reason:', r.payload.get('error'))\"."
+  }
+]

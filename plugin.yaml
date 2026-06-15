@@ -1,5 +1,5 @@
 name: cluxion-agentplugin-supercoder
-version: 0.1.0
+version: 0.2.2
 description: "Universal agent coding harness: cursor, safe patch, line budget, Rust index."
 author: cluxion
 kind: standalone
@@ -9,9 +9,12 @@ surfaces:
   - codex
   - grok_build
 provides_tools:
+  - supercoder_brief
+  - supercoder_cursor_map
+  - supercoder_lint_gate
+  - supercoder_patch
   - supercoder_plan
   - supercoder_read_window
-  - supercoder_patch
-  - supercoder_cursor_map
+  - supercoder_repo_map
+  - supercoder_syntax_gate
   - supercoder_test_gate
-  - supercoder_brief

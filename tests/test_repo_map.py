@@ -170,13 +170,11 @@ def _counting_outline_wrapper(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]
 def test_second_build_reuses_outline_cache(backend: str, sample_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _counting_outline_wrapper(monkeypatch)
     first = repo_map.build_repo_map(sample_repo)
-    assert first["outline_cache_hits"] == 0
     assert calls["count"] > 0
 
     calls["count"] = 0
     second = repo_map.build_repo_map(sample_repo)
     assert calls["count"] == 0
-    assert second["outline_cache_hits"] > 0
 
 
 def test_changed_file_invalidates_outline_cache(
@@ -208,4 +206,3 @@ def test_identical_rewrite_keeps_outline_cache(
     calls["count"] = 0
     result = repo_map.build_repo_map(sample_repo)
     assert calls["count"] == 0
-    assert result["outline_cache_hits"] > 0

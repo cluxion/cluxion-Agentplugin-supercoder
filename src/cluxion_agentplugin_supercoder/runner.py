@@ -13,6 +13,13 @@ from cluxion_agentplugin_supercoder.core.queue import plan_coding_task
 from cluxion_agentplugin_supercoder.core.safety import pre_tool_gate
 
 
+def _int(v: object, default: int) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class ToolResult:
     ok: bool
@@ -54,7 +61,7 @@ def plan(payload: Mapping[str, object]) -> ToolResult:
     if bool(payload.get("repo_map", True)):
         mapped = repo_map.build_repo_map(
             _workspace(payload),
-            budget_chars=int(payload.get("repo_map_budget_chars", 2_000)),
+            budget_chars=_int(payload.get("repo_map_budget_chars", 2_000), 2000),
         )
         if mapped.get("ok"):
             body["repo_map"] = {
@@ -66,8 +73,8 @@ def plan(payload: Mapping[str, object]) -> ToolResult:
 def read_window_tool(payload: Mapping[str, object]) -> ToolResult:
     root = _workspace(payload)
     rel = str(payload.get("path", "")).strip()
-    start = int(payload.get("start_line", 1))
-    max_lines = int(payload.get("max_lines", 120))
+    start = _int(payload.get("start_line", 1), 1)
+    max_lines = _int(payload.get("max_lines", 120), 120)
     decision = budget_for("inspect", requested_lines=max_lines)
     if not decision.allowed:
         return ToolResult(False, {"error": decision.reason, "max_lines": decision.max_lines})
@@ -174,9 +181,9 @@ def syntax_gate_tool(payload: Mapping[str, object]) -> ToolResult:
 def repo_map_tool(payload: Mapping[str, object]) -> ToolResult:
     result = repo_map.build_repo_map(
         _workspace(payload),
-        max_files=int(payload.get("max_files", repo_map.DEFAULT_MAX_FILES)),
-        max_symbols_per_file=int(payload.get("max_symbols_per_file", repo_map.DEFAULT_MAX_SYMBOLS_PER_FILE)),
-        budget_chars=int(payload.get("budget_chars", repo_map.DEFAULT_BUDGET_CHARS)),
+        max_files=_int(payload.get("max_files", repo_map.DEFAULT_MAX_FILES), repo_map.DEFAULT_MAX_FILES),
+        max_symbols_per_file=_int(payload.get("max_symbols_per_file", repo_map.DEFAULT_MAX_SYMBOLS_PER_FILE), repo_map.DEFAULT_MAX_SYMBOLS_PER_FILE),
+        budget_chars=_int(payload.get("budget_chars", repo_map.DEFAULT_BUDGET_CHARS), repo_map.DEFAULT_BUDGET_CHARS),
     )
     return ToolResult(bool(result.get("ok", False)), {key: value for key, value in result.items() if key != "ok"})
 

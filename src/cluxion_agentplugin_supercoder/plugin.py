@@ -74,13 +74,50 @@ def register(ctx: object) -> None:
     ctx.register_tool(
         name="supercoder_brief", toolset="supercoder", schema=BRIEF_SCHEMA, handler=_handle_brief, emoji="📋"
     )
+    # doctor tool registration (additive)
+    from cluxion_agentplugin_supercoder.doctor import render_json, run_doctor
+    from cluxion_agentplugin_supercoder.doctor.probes import PROBES
+    from importlib.resources import files
+    from pathlib import Path
+    from cluxion_agentplugin_supercoder import __version__
+
+    def _handle_supercoder_doctor(args: dict[str, object], **_: object) -> str:
+        try:
+            catalog_path = files("cluxion_agentplugin_supercoder.doctor") / "catalog.json"
+            result = run_doctor(
+                cwd=Path.cwd(),
+                catalog_path=Path(str(catalog_path)),
+                probes=PROBES,
+                plugin="supercoder",
+                version=__version__,
+            )
+            return render_json(result)
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, sort_keys=True)
+
+    DOCTOR_SCHEMA = {
+        "name": "supercoder_doctor",
+        "description": "Run embedded diagnostics for supercoder plugin (hermes contract, install integrity, native, etc.)",
+        "parameters": {
+            "type": "object",
+            "properties": {"verbose": {"type": "boolean"}},
+            "additionalProperties": False,
+        },
+    }
+    ctx.register_tool(
+        name="supercoder_doctor",
+        toolset="supercoder",
+        schema=DOCTOR_SCHEMA,
+        handler=_handle_supercoder_doctor,
+        emoji="🩺",
+    )
 
 
 def _wrap(callback: Callable[[dict[str, object]], runner.ToolResult]) -> Callable[[dict[str, object]], str]:
     def handler(args: dict[str, object], **_: object) -> str:
         try:
             return callback(args).to_json()
-        except (ValueError, FileNotFoundError, PermissionError) as exc:
+        except (ValueError, TypeError, OSError) as exc:
             return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, sort_keys=True)
 
     return handler

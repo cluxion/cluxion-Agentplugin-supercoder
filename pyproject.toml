@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cluxion-agentplugin-supercoder"
-version = "0.2.1"
+version = "0.2.3"
 description = "Universal agent coding harness plugin: cursor logic, safe patch, line budget, Rust index, test gates."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,7 +29,6 @@ Issues = "https://github.com/cluxion/cluxion-Agentplugin-supercoder/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cluxion_agentplugin_supercoder"]
-
 
 
 [tool.pytest.ini_options]

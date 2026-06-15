@@ -51,7 +51,6 @@ def build_repo_map(
     files_mapped = 0
     files_omitted = 0
     outlined_files = 0
-    outline_cache_hits = 0
     symbol_total = 0
     budget = max(200, int(budget_chars))
     per_file_cap = max(1, int(max_symbols_per_file))
@@ -64,13 +63,11 @@ def build_repo_map(
         block = [f"{rel} ({total_lines}L)"]
         language = language_for_path(rel) or ""
         if language in OUTLINE_LANGUAGES:
-            symbols, cache_hit = _outline_for_map_entry(
+            symbols, _ = _outline_for_map_entry(
                 base / rel,
                 language=language,
                 file_hash=str(entry.get("file_hash") or ""),
             )
-            if cache_hit:
-                outline_cache_hits += 1
             if symbols:
                 outlined_files += 1
             shown = symbols[:per_file_cap]
@@ -97,7 +94,6 @@ def build_repo_map(
         "files_mapped": files_mapped,
         "files_omitted": files_omitted,
         "outlined_files": outlined_files,
-        "outline_cache_hits": outline_cache_hits,
         "symbol_count": symbol_total,
         "truncated": files_omitted > 0,
     }
