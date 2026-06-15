@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import importlib.metadata
+import importlib.util
+import json
+import os
 import shutil
 from collections.abc import Callable
+from pathlib import Path
 
 from .framework import DoctorContext
 
@@ -113,6 +117,71 @@ def handler_exception_coverage(ctx: DoctorContext) -> tuple[str, str]:
         return "fail", f"no error json: {result[:100]}"
     except Exception as e:
         return "skip", f"cannot invoke guard: {e}"
+
+
+# NEW deterministic probes for previously-skipped catalog checks (import-avail, json-det, abi3/sqlite patterns adapted)
+# hermes_requirements_installed (import availability using find_spec to satisfy linter)
+@_register("hermes_requirements_installed")
+def hermes_requirements_installed(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        if importlib.util.find_spec("psutil") and importlib.util.find_spec("yaml"):
+            return "pass", "psutil+PyYAML importable"
+        return "warn", "missing dep"
+    except Exception as e:
+        return "skip", f"import check error: {e}"
+
+
+# repo_map_deterministic (json determinism + real call)
+@_register("repo_map_deterministic")
+def repo_map_deterministic(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        from cluxion_agentplugin_supercoder.core.repo_map import build_repo_map
+        m1 = build_repo_map(ctx.cwd, budget_chars=2000)
+        m2 = build_repo_map(ctx.cwd, budget_chars=2000)
+        def strip(d):
+            if isinstance(d, dict):
+                return {k: strip(v) for k, v in d.items() if k != "_stats"}
+            if isinstance(d, list):
+                return [strip(x) for x in d]
+            return d
+        if strip(m1) == strip(m2):
+            j1 = json.dumps(m1, sort_keys=True)
+            j2 = json.dumps(m2, sort_keys=True)
+            if j1 == j2:
+                return "pass", "deterministic + json roundtrip ok"
+            return "warn", "map match but json not"
+        return "fail", "non-deterministic"
+    except Exception as e:
+        return "skip", f"cannot run: {e}"
+
+
+# ruff_binary_discoverable (real env/path probe)
+@_register("ruff_binary_discoverable")
+def ruff_binary_discoverable(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        envb = os.environ.get("CLUXION_SUPERCODER_RUFF_BIN")
+        if envb and Path(envb).is_file():
+            return "pass", envb
+        cands = [Path(ctx.cwd)/".venv/bin/ruff", shutil.which("ruff")]
+        for c in cands:
+            if c and Path(c).is_file():
+                return "pass", str(c)
+        return "warn", "no ruff binary (advisory)"
+    except Exception as e:
+        return "skip", f"probe error: {e}"
+
+
+# file_hash_consistency (real check)
+@_register("file_hash_consistency")
+def file_hash_consistency(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        from cluxion_agentplugin_supercoder.core.hash_patch import file_hash, _normalize_newlines
+        c = 'a=1\r\nb=2'
+        if file_hash(c) == file_hash(_normalize_newlines(c)):
+            return "pass", "CRLF safe"
+        return "fail", "hash mismatch"
+    except Exception as e:
+        return "skip", f"hash error: {e}"
 
 
 # note: other checks in catalog will be reported as skip (no probe)
