@@ -18,3 +18,27 @@ dev = ["pytest>=8.0", "ruff>=0.8", "build>=1.2", "twine>=6.0", "wheel>=0.45"]
 
 [project.scripts]
 cluxion-supercoder = "cluxion_agentplugin_supercoder.cli:main"
+
+[project.entry-points."hermes_agent.plugins"]
+cluxion-agentplugin-supercoder = "cluxion_agentplugin_supercoder.plugin"
+
+[project.urls]
+Homepage = "https://github.com/cluxion/cluxion-Agentplugin-supercoder"
+Repository = "https://github.com/cluxion/cluxion-Agentplugin-supercoder"
+Issues = "https://github.com/cluxion/cluxion-Agentplugin-supercoder/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cluxion_agentplugin_supercoder"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["F", "I", "UP", "B", "SIM", "RUF"]

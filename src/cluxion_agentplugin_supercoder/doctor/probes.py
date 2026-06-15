@@ -175,7 +175,7 @@ def ruff_binary_discoverable(ctx: DoctorContext) -> tuple[str, str]:
 @_register("file_hash_consistency")
 def file_hash_consistency(ctx: DoctorContext) -> tuple[str, str]:
     try:
-        from cluxion_agentplugin_supercoder.core.hash_patch import file_hash, _normalize_newlines
+        from cluxion_agentplugin_supercoder.core.hash_patch import _normalize_newlines, file_hash
         c = 'a=1\r\nb=2'
         if file_hash(c) == file_hash(_normalize_newlines(c)):
             return "pass", "CRLF safe"
