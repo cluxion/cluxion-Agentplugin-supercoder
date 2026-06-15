@@ -114,13 +114,29 @@ def _candidate_spans(text: str, reference: str, line_drift: int) -> list[tuple[i
 
 def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, bool] | None:
     best: tuple[int, int, str, float] | None = None
+    best_lines: tuple[int, int] | None = None
     ambiguous = False
+    lines = text.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
     for start, end, block in _candidate_spans(text, reference, MAX_LINE_DRIFT):
+        # compute line range [start_line, end_line) for overlap test
+        start_line = 0
+        while start_line < len(offsets) - 1 and offsets[start_line + 1] <= start:
+            start_line += 1
+        end_line = start_line
+        while end_line < len(offsets) - 1 and offsets[end_line] < end:
+            end_line += 1
         score = SequenceMatcher(None, block, reference, autojunk=False).ratio()
         if best is None or score > best[3]:
             best = (start, end, block, score)
+            best_lines = (start_line, end_line)
             ambiguous = False
         elif score >= DEFAULT_FUZZY_THRESHOLD and best and abs(score - best[3]) < 0.015:
+            # only treat as ambiguous if a genuinely different (non-overlapping) location matches closely
+            if best_lines is not None and not (end_line <= best_lines[0] or start_line >= best_lines[1]):
+                continue  # overlapping window on same location -> not real ambiguity
             ambiguous = True
     if best is None:
         return None
