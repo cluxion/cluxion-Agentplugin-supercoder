@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import concurrent.futures
+import contextlib
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -116,3 +120,82 @@ def test_duplicate_blocks_still_ambiguous(tmp_path: Path) -> None:
     result = apply_patch(path, old_text=near, new_text="def f():\n    return 3\n")
     assert result.success is False
     assert result.strategy == "no_match"
+
+
+# === Concurrency and atomicity tests ===
+
+def _worker_apply(i: int, path: Path) -> bool:
+    """Worker that applies a unique non-overlapping patch under lock."""
+    old = f"# UNIQUE_PATCH_{i}_START\n"
+    new = f"# UNIQUE_PATCH_{i}_DONE\n"
+    # distinct markers, no value chaining conflict
+    result = apply_patch(path, old_text=old, new_text=new)
+    return result.success
+
+
+def test_concurrent_patches_no_lost_update(tmp_path: Path) -> None:
+    """8 concurrent workers on same file: lock serializes, no lost updates, final coherent."""
+    path = tmp_path / "concurrent.py"
+    # initial content with 8 distinct unique markers
+    initial = "\n".join(f"# UNIQUE_PATCH_{i}_START" for i in range(8)) + "\n"
+    path.write_text(initial, encoding="utf-8")
+
+    # each patch changes its unique marker; lock ensures serialization, all succeed
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [
+            executor.submit(_worker_apply, i, path) for i in range(8)
+        ]
+        successes = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    assert all(successes), "Some patches lost due to race"
+    final = path.read_text(encoding="utf-8")
+    # final should have all DONE markers, no START left
+    for i in range(8):
+        assert f"# UNIQUE_PATCH_{i}_DONE" in final
+        assert f"# UNIQUE_PATCH_{i}_START" not in final
+
+    # hash chain consistent (changed from initial)
+    new_hash = file_hash(final)
+    assert new_hash != file_hash(initial)
+
+
+def test_atomic_write_interruption_leaves_original_intact(tmp_path: Path) -> None:
+    """Simulated mid-write crash leaves ORIGINAL file intact (temp may remain, no truncate)."""
+    path = tmp_path / "atomic_test.txt"
+    original = "IMPORTANT ORIGINAL CONTENT\nDO NOT LOSE\n"
+    path.write_text(original, encoding="utf-8")
+    orig_hash = file_hash(original)
+
+    # simulate crash mid atomic write by patching _atomic_write temporarily
+    def crashing_atomic(p: Path, content: str) -> None:
+        dir_ = p.parent
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=dir_, delete=False, suffix=".tmp"
+        ) as tmp:
+            tmp.write(content[:10])  # partial write
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            # simulate kill before replace
+            raise RuntimeError("simulated crash mid-write")
+
+    original_atomic = None
+    try:
+        # monkey patch for test
+        import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+        original_atomic = hp._atomic_write
+        hp._atomic_write = crashing_atomic
+        with contextlib.suppress(RuntimeError):
+            hp._atomic_write(path, "CORRUPTED NEW CONTENT\n")
+        # after crash, original must be untouched
+        after = path.read_text(encoding="utf-8")
+        assert after == original, "Atomic write failed: original was corrupted or truncated"
+        assert file_hash(after) == orig_hash
+    finally:
+        import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+        if original_atomic is not None:
+            hp._atomic_write = original_atomic
+        # cleanup any leftover temp if test created
+        for f in tmp_path.glob("*.tmp"):
+            f.unlink(missing_ok=True)

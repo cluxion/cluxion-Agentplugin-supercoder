@@ -3,13 +3,38 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+
 DEFAULT_FUZZY_THRESHOLD = 0.86
 MAX_CONTEXT_SCAN = 8
 MAX_LINE_DRIFT = 2
+
+
+@contextmanager
+def _exclusive_lock(path: Path):
+    """Exclusive advisory lock on target file (fcntl.flock). Graceful degrade on non-POSIX."""
+    if fcntl is None or not path.exists():
+        yield
+        return
+    fd = os.open(str(path), os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,28 +69,29 @@ def apply_patch(
 ) -> PatchResult:
     if not path.exists():
         return _failed(str(path), "missing_file", expected_file_hash, "file not found")
-    text = path.read_text(encoding="utf-8")
-    current_hash = file_hash(text)
-    if expected_file_hash and current_hash != _normalize_hash(expected_file_hash):
-        return _failed(str(path), "stale_file", expected_file_hash, "file changed since cursor was created")
-    exact = _exact_spans(text, old_text)
-    if exact:
-        start, end = exact[0]
-        return _commit(path, text, start, end, new_text, "exact", expected_file_hash or current_hash, current_hash, 1.0)
-    fuzzy = _best_fuzzy_span(text, old_text)
-    if fuzzy and fuzzy[3] >= fuzzy_threshold and not fuzzy[4]:
-        return _commit(
-            path,
-            text,
-            fuzzy[0],
-            fuzzy[1],
-            new_text,
-            "fuzzy",
-            expected_file_hash or current_hash,
-            current_hash,
-            fuzzy[3],
-        )
-    return _failed(str(path), "no_match", expected_file_hash or current_hash, "patch target not found")
+    with _exclusive_lock(path):
+        text = path.read_text(encoding="utf-8")
+        current_hash = file_hash(text)
+        if expected_file_hash and current_hash != _normalize_hash(expected_file_hash):
+            return _failed(str(path), "stale_file", expected_file_hash, "file changed since cursor was created")
+        exact = _exact_spans(text, old_text)
+        if exact:
+            start, end = exact[0]
+            return _commit(path, text, start, end, new_text, "exact", expected_file_hash or current_hash, current_hash, 1.0)
+        fuzzy = _best_fuzzy_span(text, old_text)
+        if fuzzy and fuzzy[3] >= fuzzy_threshold and not fuzzy[4]:
+            return _commit(
+                path,
+                text,
+                fuzzy[0],
+                fuzzy[1],
+                new_text,
+                "fuzzy",
+                expected_file_hash or current_hash,
+                current_hash,
+                fuzzy[3],
+            )
+        return _failed(str(path), "no_match", expected_file_hash or current_hash, "patch target not found")
 
 
 def _normalize_newlines(content: str) -> str:
@@ -143,6 +169,19 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
     return best[0], best[1], best[2], best[3], ambiguous
 
 
+def _atomic_write(path: Path, content: str) -> None:
+    """Atomic replace via temp in same dir + fsync to prevent corruption on crash."""
+    dir_ = path.parent
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=dir_, delete=False, suffix=".tmp"
+    ) as tmp:
+        tmp.write(content)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
+
+
 def _commit(
     path: Path,
     text: str,
@@ -155,7 +194,7 @@ def _commit(
     score: float,
 ) -> PatchResult:
     updated = f"{text[:start]}{new_content}{text[end:]}"
-    path.write_text(updated, encoding="utf-8")
+    _atomic_write(path, updated)
     return PatchResult(True, str(path), strategy, "patch applied", expected, matched, round(score, 4), 1)
 
 
