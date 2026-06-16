@@ -44,11 +44,7 @@ def _dist_info(tree: Path) -> Path:
 
 def _native_tags(native_tree: Path) -> list[str]:
     wheel_meta = (_dist_info(native_tree) / "WHEEL").read_text(encoding="utf-8")
-    tags = [
-        line.split(":", 1)[1].strip()
-        for line in wheel_meta.splitlines()
-        if line.startswith("Tag:")
-    ]
+    tags = [line.split(":", 1)[1].strip() for line in wheel_meta.splitlines() if line.startswith("Tag:")]
     if not tags:
         raise SystemExit("native wheel has no Tag entries")
     return tags

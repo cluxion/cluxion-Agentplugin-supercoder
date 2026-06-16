@@ -71,7 +71,12 @@ def test_new_probes_non_skip():
     )
     statuses = {c.check_id: c.status for c in result.checks}
     # assert at least two newly implemented return non-skip
-    new_checks = ["hermes_requirements_installed", "repo_map_deterministic", "ruff_binary_discoverable", "file_hash_consistency"]
+    new_checks = [
+        "hermes_requirements_installed",
+        "repo_map_deterministic",
+        "ruff_binary_discoverable",
+        "file_hash_consistency",
+    ]
     non_skip_count = sum(1 for k in new_checks if k in statuses and statuses[k] != "skip")
     assert non_skip_count >= 2, f"only {non_skip_count} new probes non-skip"
 
@@ -94,9 +99,8 @@ def test_probe_exception_becomes_fail():
 def test_warn_only_is_ok():
     # construct a result with only warn (no fail)
     from cluxion_agentplugin_supercoder.doctor.framework import CheckResult, DoctorResult
-    checks = (
-        CheckResult(check_id="x", category="c", severity="medium", status="warn", detail="w"),
-    )
+
+    checks = (CheckResult(check_id="x", category="c", severity="medium", status="warn", detail="w"),)
     r = DoctorResult(plugin="p", version="0.2.4", checks=checks)
     assert r.ok is True
     assert r.summary == "ok"

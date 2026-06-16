@@ -124,6 +124,7 @@ def test_duplicate_blocks_still_ambiguous(tmp_path: Path) -> None:
 
 # === Concurrency and atomicity tests ===
 
+
 def _worker_apply(i: int, path: Path) -> bool:
     """Worker that applies a unique non-overlapping patch under lock."""
     old = f"# UNIQUE_PATCH_{i}_START\n"
@@ -142,9 +143,7 @@ def test_concurrent_patches_no_lost_update(tmp_path: Path) -> None:
 
     # each patch changes its unique marker; lock ensures serialization, all succeed
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [
-            executor.submit(_worker_apply, i, path) for i in range(8)
-        ]
+        futures = [executor.submit(_worker_apply, i, path) for i in range(8)]
         successes = [f.result() for f in concurrent.futures.as_completed(futures)]
 
     assert all(successes), "Some patches lost due to race"
@@ -169,9 +168,7 @@ def test_atomic_write_interruption_leaves_original_intact(tmp_path: Path) -> Non
     # simulate crash mid atomic write by patching _atomic_write temporarily
     def crashing_atomic(p: Path, content: str) -> None:
         dir_ = p.parent
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=dir_, delete=False, suffix=".tmp"
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=dir_, delete=False, suffix=".tmp") as tmp:
             tmp.write(content[:10])  # partial write
             tmp.flush()
             os.fsync(tmp.fileno())

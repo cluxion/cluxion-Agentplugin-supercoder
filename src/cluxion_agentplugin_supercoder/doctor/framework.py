@@ -77,9 +77,7 @@ class DoctorResult:
 
 
 class DoctorContext:
-    def __init__(
-        self, cwd: Path, hermes_bin: str, run: Callable[[list[str]], subprocess.CompletedProcess]
-    ) -> None:
+    def __init__(self, cwd: Path, hermes_bin: str, run: Callable[[list[str]], subprocess.CompletedProcess]) -> None:
         self.cwd = cwd
         self.hermes_bin = hermes_bin
         self.run = run
@@ -160,14 +158,10 @@ def run_doctor(
 
 
 def render_json(result: DoctorResult) -> str:
-    return json.dumps(
-        result.to_json_object(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    return json.dumps(result.to_json_object(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def render_text(
-    result: DoctorResult, catalog: tuple[CatalogEntry, ...], *, verbose: bool = False
-) -> str:
+def render_text(result: DoctorResult, catalog: tuple[CatalogEntry, ...], *, verbose: bool = False) -> str:
     entry_map = {e.check_id: e for e in catalog}
     lines: list[str] = []
     for c in result.checks:

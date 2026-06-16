@@ -77,7 +77,9 @@ def apply_patch(
         exact = _exact_spans(text, old_text)
         if exact:
             start, end = exact[0]
-            return _commit(path, text, start, end, new_text, "exact", expected_file_hash or current_hash, current_hash, 1.0)
+            return _commit(
+                path, text, start, end, new_text, "exact", expected_file_hash or current_hash, current_hash, 1.0
+            )
         fuzzy = _best_fuzzy_span(text, old_text)
         if fuzzy and fuzzy[3] >= fuzzy_threshold and not fuzzy[4]:
             return _commit(
@@ -172,9 +174,7 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
 def _atomic_write(path: Path, content: str) -> None:
     """Atomic replace via temp in same dir + fsync to prevent corruption on crash."""
     dir_ = path.parent
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=dir_, delete=False, suffix=".tmp"
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=dir_, delete=False, suffix=".tmp") as tmp:
         tmp.write(content)
         tmp.flush()
         os.fsync(tmp.fileno())

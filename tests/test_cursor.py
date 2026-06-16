@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from cluxion_agentplugin_supercoder import runner
 from cluxion_agentplugin_supercoder.core.cursor import read_window

@@ -60,7 +60,9 @@ def entry_point_registered(ctx: DoctorContext) -> tuple[str, str]:
     try:
         eps = importlib.metadata.entry_points(group="hermes_agent.plugins")
         for ep in eps:
-            if "cluxion-agentplugin-supercoder" in (ep.name or "").lower() or "cluxion_agentplugin_supercoder" in (ep.value or ""):
+            if "cluxion-agentplugin-supercoder" in (ep.name or "").lower() or "cluxion_agentplugin_supercoder" in (
+                ep.value or ""
+            ):
                 mod = ep.load()
                 if hasattr(mod, "register") and callable(mod.register):
                     return "pass", ep.value or str(ep)
@@ -141,14 +143,17 @@ def hermes_requirements_installed(ctx: DoctorContext) -> tuple[str, str]:
 def repo_map_deterministic(ctx: DoctorContext) -> tuple[str, str]:
     try:
         from cluxion_agentplugin_supercoder.core.repo_map import build_repo_map
+
         m1 = build_repo_map(ctx.cwd, budget_chars=2000)
         m2 = build_repo_map(ctx.cwd, budget_chars=2000)
+
         def strip(d):
             if isinstance(d, dict):
                 return {k: strip(v) for k, v in d.items() if k != "_stats"}
             if isinstance(d, list):
                 return [strip(x) for x in d]
             return d
+
         if strip(m1) == strip(m2):
             j1 = json.dumps(m1, sort_keys=True)
             j2 = json.dumps(m2, sort_keys=True)
@@ -167,7 +172,7 @@ def ruff_binary_discoverable(ctx: DoctorContext) -> tuple[str, str]:
         envb = os.environ.get("CLUXION_SUPERCODER_RUFF_BIN")
         if envb and Path(envb).is_file():
             return "pass", envb
-        cands = [Path(ctx.cwd)/".venv/bin/ruff", shutil.which("ruff")]
+        cands = [Path(ctx.cwd) / ".venv/bin/ruff", shutil.which("ruff")]
         for c in cands:
             if c and Path(c).is_file():
                 return "pass", str(c)
@@ -181,7 +186,8 @@ def ruff_binary_discoverable(ctx: DoctorContext) -> tuple[str, str]:
 def file_hash_consistency(ctx: DoctorContext) -> tuple[str, str]:
     try:
         from cluxion_agentplugin_supercoder.core.hash_patch import _normalize_newlines, file_hash
-        c = 'a=1\r\nb=2'
+
+        c = "a=1\r\nb=2"
         if file_hash(c) == file_hash(_normalize_newlines(c)):
             return "pass", "CRLF safe"
         return "fail", "hash mismatch"

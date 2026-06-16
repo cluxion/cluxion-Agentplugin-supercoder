@@ -52,6 +52,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def load_catalog_for_text(catalog_path):
     # helper to avoid circular, but since framework has load_catalog
     from cluxion_agentplugin_supercoder.doctor.framework import load_catalog
+
     return load_catalog(Path(str(catalog_path)))
 
 

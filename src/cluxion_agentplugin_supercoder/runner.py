@@ -190,7 +190,10 @@ def repo_map_tool(payload: Mapping[str, object]) -> ToolResult:
     result = repo_map.build_repo_map(
         _workspace(payload),
         max_files=_int(payload.get("max_files", repo_map.DEFAULT_MAX_FILES), repo_map.DEFAULT_MAX_FILES),
-        max_symbols_per_file=_int(payload.get("max_symbols_per_file", repo_map.DEFAULT_MAX_SYMBOLS_PER_FILE), repo_map.DEFAULT_MAX_SYMBOLS_PER_FILE),
+        max_symbols_per_file=_int(
+            payload.get("max_symbols_per_file", repo_map.DEFAULT_MAX_SYMBOLS_PER_FILE),
+            repo_map.DEFAULT_MAX_SYMBOLS_PER_FILE,
+        ),
         budget_chars=_int(payload.get("budget_chars", repo_map.DEFAULT_BUDGET_CHARS), repo_map.DEFAULT_BUDGET_CHARS),
     )
     return ToolResult(bool(result.get("ok", False)), {key: value for key, value in result.items() if key != "ok"})
