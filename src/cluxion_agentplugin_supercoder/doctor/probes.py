@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -108,11 +109,15 @@ def native_module_importable(ctx: DoctorContext) -> tuple[str, str]:
 @_register("handler_exception_coverage")
 def handler_exception_coverage(ctx: DoctorContext) -> tuple[str, str]:
     try:
-        from cluxion_agentplugin_supercoder.plugin import _json_result
-        def bad_cb():
+        from cluxion_agentplugin_supercoder import runner
+        from cluxion_agentplugin_supercoder.plugin import _wrap
+
+        def bad_cb(_payload: dict[str, object]) -> runner.ToolResult:
             raise TypeError("test TypeError for coverage")
-        result = _json_result(bad_cb)
-        if isinstance(result, str) and "ok" in result and "false" in result.lower():
+
+        result = _wrap(bad_cb)({})
+        parsed = json.loads(result)
+        if parsed.get("ok") is False and "TypeError" in str(parsed.get("error", "")):
             return "pass", "degraded to error JSON"
         return "fail", f"no error json: {result[:100]}"
     except Exception as e:
@@ -182,6 +187,151 @@ def file_hash_consistency(ctx: DoctorContext) -> tuple[str, str]:
         return "fail", "hash mismatch"
     except Exception as e:
         return "skip", f"hash error: {e}"
+
+
+_SECRET_BLOCKED = "secret file access blocked"
+_ESCAPE_BLOCKED = "workspace escape blocked"
+
+
+def _assert_tool_blocks(
+    tool_fn: Callable[[dict[str, object]], object],
+    *,
+    cwd: str,
+    path: str,
+    expected_error: str,
+    extra: dict[str, object] | None = None,
+) -> str | None:
+    from cluxion_agentplugin_supercoder import runner
+
+    payload: dict[str, object] = {"cwd": cwd, "path": path}
+    if extra:
+        payload.update(extra)
+    result = tool_fn(payload)
+    if not isinstance(result, runner.ToolResult):
+        return f"unexpected result type for {path}"
+    if result.ok or result.payload.get("error") != expected_error:
+        return f"{tool_fn.__name__} on {path}: ok={result.ok} error={result.payload.get('error')}"
+    return None
+
+
+@_register("path_security_secrets_blocked")
+def path_security_secrets_blocked(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        from cluxion_agentplugin_supercoder import runner
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".env").write_text("KEY=secret", encoding="utf-8")
+            cred = root / "config" / "credentials"
+            cred.mkdir(parents=True)
+            (cred / "db.json").write_text("{}", encoding="utf-8")
+            for rel in (".env", "config/credentials/db.json"):
+                for tool_fn, extra in (
+                    (runner.read_window_tool, None),
+                    (runner.patch_tool, {"old_text": "x", "new_text": "y", "syntax_gate": False}),
+                ):
+                    err = _assert_tool_blocks(
+                        tool_fn,
+                        cwd=str(root),
+                        path=rel,
+                        expected_error=_SECRET_BLOCKED,
+                        extra=extra,
+                    )
+                    if err:
+                        return "fail", err
+            return "pass", "read_window_tool + patch_tool block .env and credentials"
+    except Exception as e:
+        return "skip", f"cannot run: {e}"
+
+
+@_register("hermes_context_workspace_root")
+def hermes_context_workspace_root(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        from cluxion_agentplugin_supercoder import runner
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            outside = base / "outside"
+            outside.mkdir()
+            (outside / "secret.txt").write_text("leaked", encoding="utf-8")
+            workspace = base / "work"
+            workspace.mkdir()
+            sibling = base / "work2"
+            sibling.mkdir()
+            (sibling / "x").write_text("leaked", encoding="utf-8")
+            for path in ("../outside/secret.txt", "../work2/x"):
+                err = _assert_tool_blocks(
+                    runner.read_window_tool,
+                    cwd=str(workspace),
+                    path=path,
+                    expected_error=_ESCAPE_BLOCKED,
+                )
+                if err:
+                    return "fail", err
+            return "pass", "traversal + sibling-prefix escape blocked"
+    except Exception as e:
+        return "skip", f"cannot run: {e}"
+
+
+@_register("patch_cursor_validity")
+def patch_cursor_validity(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        from cluxion_agentplugin_supercoder import runner
+        from cluxion_agentplugin_supercoder.core.cursor import read_window
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = root / "t.py"
+            target.write_text("x=1", encoding="utf-8")
+            window = read_window(root, "t.py")
+            target.write_text("x=2", encoding="utf-8")
+            result = runner.patch_tool(
+                {
+                    "cwd": str(root),
+                    "path": "t.py",
+                    "old_text": "x=1",
+                    "new_text": "x=3",
+                    "expected_file_hash": window.file_hash,
+                    "syntax_gate": False,
+                    "lint_gate": False,
+                }
+            )
+            if result.ok:
+                return "fail", "patch applied with stale hash"
+            if result.payload.get("strategy") != "stale_file":
+                return "fail", f"expected stale_file, got {result.payload.get('strategy')}"
+            return "pass", "stale hash blocked"
+    except Exception as e:
+        return "skip", f"cannot run: {e}"
+
+
+@_register("stale_cursor_protection_enforced")
+def stale_cursor_protection_enforced(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        from cluxion_agentplugin_supercoder import runner
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "t.py").write_text("x=1", encoding="utf-8")
+            result = runner.patch_tool(
+                {
+                    "cwd": str(root),
+                    "path": "t.py",
+                    "old_text": "x",
+                    "new_text": "y",
+                    "stale_cursor": True,
+                    "syntax_gate": False,
+                    "lint_gate": False,
+                }
+            )
+            if result.ok:
+                return "fail", "patch applied with stale_cursor=True"
+            error = str(result.payload.get("error", ""))
+            if "stale cursor" not in error:
+                return "fail", f"unexpected error: {error}"
+            return "pass", "stale_cursor flag blocked"
+    except Exception as e:
+        return "skip", f"cannot run: {e}"
 
 
 # note: other checks in catalog will be reported as skip (no probe)

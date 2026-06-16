@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cluxion_agentplugin_supercoder.core.hash_patch import file_hash
+from cluxion_agentplugin_supercoder.core.safety import pre_tool_gate
 
 
 @dataclass(frozen=True)
@@ -27,11 +28,14 @@ def read_window(
     max_lines: int = 120,
     purpose: str = "read",
 ) -> LineWindow:
+    gate = pre_tool_gate("read_window", {"path": rel_path}, workspace=root)
+    if gate.decision == "block":
+        raise PermissionError(gate.reason)
     path = (root / rel_path).resolve()
     if not path.exists():
         raise FileNotFoundError(rel_path)
-    if not str(path).startswith(str(root.resolve())):
-        raise PermissionError("path escapes workspace root")
+    if not path.is_relative_to(root.resolve()):
+        raise PermissionError("workspace escape blocked")
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     start = max(1, start_line)

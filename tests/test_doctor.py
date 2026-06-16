@@ -1,5 +1,7 @@
 """Tests for embedded doctor (determinism + cross-cutting checks)."""
 
+import json
+import subprocess
 from pathlib import Path
 
 from cluxion_agentplugin_supercoder.doctor import (
@@ -7,6 +9,7 @@ from cluxion_agentplugin_supercoder.doctor import (
     render_json,
     run_doctor,
 )
+from cluxion_agentplugin_supercoder.doctor.framework import DoctorContext
 from cluxion_agentplugin_supercoder.doctor.probes import PROBES
 
 
@@ -96,4 +99,94 @@ def test_warn_only_is_ok():
     )
     r = DoctorResult(plugin="p", version="0.2.4", checks=checks)
     assert r.ok is True
+    assert r.summary == "ok"
     # exit would be 0
+
+
+def test_security_probes_registered_and_pass():
+    cat = _catalog_path()
+    result = run_doctor(
+        cwd=Path.cwd(),
+        catalog_path=cat,
+        probes=PROBES,
+        plugin="supercoder",
+        version="0.2.4",
+    )
+    statuses = {c.check_id: c.status for c in result.checks}
+    for check_id in (
+        "path_security_secrets_blocked",
+        "hermes_context_workspace_root",
+        "patch_cursor_validity",
+        "stale_cursor_protection_enforced",
+        "handler_exception_coverage",
+    ):
+        assert statuses[check_id] == "pass", f"{check_id}: {statuses[check_id]}"
+
+
+def test_critical_skip_marks_degraded_summary():
+    cat = _catalog_path()
+    partial = {k: v for k, v in PROBES.items() if k != "path_security_secrets_blocked"}
+    result = run_doctor(
+        cwd=Path.cwd(),
+        catalog_path=cat,
+        probes=partial,
+        plugin="supercoder",
+        version="0.2.4",
+    )
+    statuses = {c.check_id: c.status for c in result.checks}
+    assert statuses["path_security_secrets_blocked"] == "skip"
+    assert result.summary == "degraded"
+    assert result.ok is False
+    payload = json.loads(render_json(result))
+    assert payload["summary"] == "degraded"
+    assert payload["ok"] is False
+
+
+def _doctor_ctx() -> DoctorContext:
+    return DoctorContext(
+        cwd=Path.cwd(),
+        hermes_bin="hermes",
+        run=lambda cmd: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+
+
+def test_path_security_probe_detects_ungated_read(monkeypatch):
+    from cluxion_agentplugin_supercoder.core.safety import SafetyDecision
+    from cluxion_agentplugin_supercoder.doctor.probes import path_security_secrets_blocked
+
+    def allow_all(*_args, **_kwargs):
+        return SafetyDecision("allow", "bypassed")
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.runner.pre_tool_gate",
+        allow_all,
+    )
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.core.cursor.pre_tool_gate",
+        allow_all,
+    )
+    status, _detail = path_security_secrets_blocked(_doctor_ctx())
+    assert status == "fail"
+
+
+def test_hermes_workspace_probe_detects_ungated_read(monkeypatch):
+    from cluxion_agentplugin_supercoder.core.safety import SafetyDecision
+    from cluxion_agentplugin_supercoder.doctor.probes import hermes_context_workspace_root
+
+    def allow_all(*_args, **_kwargs):
+        return SafetyDecision("allow", "bypassed")
+
+    def always_contained(self, _other):
+        return True
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.runner.pre_tool_gate",
+        allow_all,
+    )
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.core.cursor.pre_tool_gate",
+        allow_all,
+    )
+    monkeypatch.setattr(Path, "is_relative_to", always_contained)
+    status, _detail = hermes_context_workspace_root(_doctor_ctx())
+    assert status == "fail"

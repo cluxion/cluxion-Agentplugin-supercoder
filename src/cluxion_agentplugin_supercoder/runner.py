@@ -73,6 +73,14 @@ def plan(payload: Mapping[str, object]) -> ToolResult:
 def read_window_tool(payload: Mapping[str, object]) -> ToolResult:
     root = _workspace(payload)
     rel = str(payload.get("path", "")).strip()
+    gate = pre_tool_gate(
+        "read_window",
+        payload,
+        workspace=root,
+        stale_cursor=bool(payload.get("stale_cursor", False)),
+    )
+    if gate.decision == "block":
+        return ToolResult(False, {"error": gate.reason})
     start = _int(payload.get("start_line", 1), 1)
     max_lines = _int(payload.get("max_lines", 120), 120)
     decision = budget_for("inspect", requested_lines=max_lines)
