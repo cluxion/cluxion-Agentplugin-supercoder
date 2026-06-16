@@ -127,7 +127,35 @@ def test_security_probes_registered_and_pass():
         assert statuses[check_id] == "pass", f"{check_id}: {statuses[check_id]}"
 
 
-def test_critical_skip_marks_degraded_summary():
+def test_summary_critical_skip_is_degraded():
+    from cluxion_agentplugin_supercoder.doctor.framework import CheckResult, DoctorResult
+
+    checks = (
+        CheckResult(check_id="a", category="c", severity="critical", status="skip", detail="no probe"),
+        CheckResult(check_id="b", category="c", severity="high", status="pass", detail="ok"),
+    )
+    r = DoctorResult(plugin="p", version="0.2.4", checks=checks)
+    assert r.summary == "degraded"
+    assert r.ok is False
+
+
+def test_summary_critical_fail_is_fail():
+    from cluxion_agentplugin_supercoder.doctor.framework import CheckResult, DoctorResult
+
+    checks = (
+        CheckResult(check_id="a", category="c", severity="critical", status="fail", detail="broken"),
+        CheckResult(check_id="b", category="c", severity="critical", status="skip", detail="no probe"),
+    )
+    r = DoctorResult(plugin="p", version="0.2.4", checks=checks)
+    assert r.summary == "fail"
+    assert r.ok is False
+
+
+def test_critical_skip_marks_degraded_summary(monkeypatch):
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.doctor.probes.shutil.which",
+        lambda _: None,
+    )
     cat = _catalog_path()
     partial = {k: v for k, v in PROBES.items() if k != "path_security_secrets_blocked"}
     result = run_doctor(
@@ -139,11 +167,33 @@ def test_critical_skip_marks_degraded_summary():
     )
     statuses = {c.check_id: c.status for c in result.checks}
     assert statuses["path_security_secrets_blocked"] == "skip"
+    assert statuses["hermes_on_path"] == "skip"
+    assert statuses["hermes_oneshot_flag"] == "skip"
     assert result.summary == "degraded"
     assert result.ok is False
     payload = json.loads(render_json(result))
     assert payload["summary"] == "degraded"
     assert payload["ok"] is False
+
+
+def test_hermes_on_path_skips_when_absent(monkeypatch):
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.doctor.probes.shutil.which",
+        lambda _: None,
+    )
+    status, detail = PROBES["hermes_on_path"](_doctor_ctx())
+    assert status == "skip"
+    assert "cannot verify" in detail
+
+
+def test_hermes_oneshot_flag_skips_when_absent(monkeypatch):
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.doctor.probes.shutil.which",
+        lambda _: None,
+    )
+    status, detail = PROBES["hermes_oneshot_flag"](_doctor_ctx())
+    assert status == "skip"
+    assert "cannot verify" in detail
 
 
 def _doctor_ctx() -> DoctorContext:

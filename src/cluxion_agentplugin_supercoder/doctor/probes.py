@@ -15,6 +15,12 @@ from .framework import DoctorContext
 
 PROBES: dict[str, Callable[[DoctorContext], tuple[str, str]]] = {}
 
+_HERMES_ABSENT_SKIP = "hermes binary not on PATH — cannot verify"
+
+
+def _hermes_path(ctx: DoctorContext) -> str | None:
+    return shutil.which(ctx.hermes_bin)
+
 
 def _register(name: str):
     def deco(fn):
@@ -26,14 +32,16 @@ def _register(name: str):
 
 @_register("hermes_on_path")
 def hermes_on_path(ctx: DoctorContext) -> tuple[str, str]:
-    p = shutil.which(ctx.hermes_bin)
+    p = _hermes_path(ctx)
     if p:
         return "pass", str(p)
-    return "fail", "not found on PATH"
+    return "skip", _HERMES_ABSENT_SKIP
 
 
 @_register("hermes_version")
 def hermes_version(ctx: DoctorContext) -> tuple[str, str]:
+    if _hermes_path(ctx) is None:
+        return "skip", _HERMES_ABSENT_SKIP
     try:
         cp = ctx.run([ctx.hermes_bin, "--version"])
         if cp.returncode == 0 and "Hermes Agent v" in cp.stdout:
@@ -45,6 +53,8 @@ def hermes_version(ctx: DoctorContext) -> tuple[str, str]:
 
 @_register("hermes_oneshot_flag")
 def hermes_oneshot_flag(ctx: DoctorContext) -> tuple[str, str]:
+    if _hermes_path(ctx) is None:
+        return "skip", _HERMES_ABSENT_SKIP
     try:
         cp = ctx.run([ctx.hermes_bin, "--help"])
         out = cp.stdout + cp.stderr
@@ -73,6 +83,8 @@ def entry_point_registered(ctx: DoctorContext) -> tuple[str, str]:
 
 @_register("toolset_valid")
 def toolset_valid(ctx: DoctorContext) -> tuple[str, str]:
+    if _hermes_path(ctx) is None:
+        return "skip", _HERMES_ABSENT_SKIP
     try:
         cp = ctx.run([ctx.hermes_bin, "tools", "list"])
         if cp.returncode == 0 and "supercoder" in cp.stdout:
