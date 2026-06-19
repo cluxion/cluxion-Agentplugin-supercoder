@@ -82,6 +82,17 @@ def test_rust_outline_in_tree_sitter_tiers_fails_open_in_python(backend: str, sa
         assert ("method", "run") in pairs
 
 
+def test_max_files_cap_is_surfaced_honestly(backend: str, tmp_path: Path) -> None:
+    for index in range(6):
+        (tmp_path / f"mod_{index}.py").write_text(f"def fn_{index}():\n    pass\n", encoding="utf-8")
+    result = repo_map.build_repo_map(tmp_path, max_files=3, budget_chars=8000)
+    assert result["truncated"] is True
+    assert result["files_omitted"] > 0
+    assert result["files_mapped"] + result["files_omitted"] == result["files_scanned"] == 6
+    assert result["files_omitted"] == 3
+    assert result["files_mapped"] == 3
+
+
 def test_budget_omits_files_honestly(backend: str, sample_repo: Path) -> None:
     # budget_chars clamps to a 200-char floor, so overflow it with real files.
     for index in range(8):

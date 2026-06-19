@@ -32,3 +32,16 @@ def test_is_coding_task_korean_and_english() -> None:
     assert is_coding_task("fix the login bug")
     assert is_coding_task("이 버그 수정해줘")
     assert not is_coding_task("오늘 날씨 어때?")
+
+
+def test_is_coding_task_word_boundaries_avoid_false_positives() -> None:
+    assert not is_coding_task("what is the latest news")
+    assert not is_coding_task("add a prefix to each line")
+    assert not is_coding_task("who won the contest yesterday")
+
+
+def test_is_coding_task_true_positives_with_word_boundaries() -> None:
+    assert is_coding_task("fix the bug in main.py")
+    assert is_coding_task("add a unit test for login")
+    assert is_coding_task("refactor the auth module")
+    assert is_coding_task("debug the timeout issue")

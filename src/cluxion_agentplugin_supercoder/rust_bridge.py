@@ -107,14 +107,7 @@ def _parse_backend_json(raw: str, command: str) -> dict[str, object]:
     return parsed
 
 
-def _py_scan(
-    root: Path,
-    *,
-    max_files: int,
-    extensions: tuple[str, ...],
-) -> dict[str, object]:
-    from cluxion_agentplugin_supercoder.core.hash_patch import file_hash
-
+def _collect_candidates(root: Path, *, extensions: tuple[str, ...]) -> list[str]:
     candidates: list[str] = []
     for path in root.rglob("*"):
         if not path.is_file():
@@ -125,6 +118,27 @@ def _py_scan(
             continue
         candidates.append(str(path.relative_to(root)))
     candidates.sort()
+    return candidates
+
+
+def count_scan_candidates(
+    root: Path,
+    *,
+    extensions: tuple[str, ...] = DEFAULT_EXTENSIONS,
+) -> int:
+    """Return how many files match scan_repo criteria before the max_files cap."""
+    return len(_collect_candidates(root, extensions=extensions))
+
+
+def _py_scan(
+    root: Path,
+    *,
+    max_files: int,
+    extensions: tuple[str, ...],
+) -> dict[str, object]:
+    from cluxion_agentplugin_supercoder.core.hash_patch import file_hash
+
+    candidates = _collect_candidates(root, extensions=extensions)
     entries: list[dict[str, object]] = []
     for rel in candidates[:max_files]:
         try:
@@ -138,7 +152,12 @@ def _py_scan(
                 "total_lines": text.count("\n") + (1 if text else 0),
             }
         )
-    return {"ok": True, "entries": entries, "count": len(entries)}
+    return {
+        "ok": True,
+        "entries": entries,
+        "count": len(entries),
+        "total_candidates": len(candidates),
+    }
 
 
 def _binary() -> str:
@@ -158,6 +177,7 @@ __all__ = [
     "DEFAULT_MAX_FILES",
     "INDEX_BACKEND_ENV",
     "INDEX_BIN_ENV",
+    "count_scan_candidates",
     "index_available",
     "resolve_backend",
     "scan_repo",

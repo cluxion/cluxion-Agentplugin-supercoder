@@ -120,6 +120,61 @@ def native_module_importable(ctx: DoctorContext) -> tuple[str, str]:
 
 # plugin-specific probes (deterministic ones only) - for supercoder we can add if symbols found
 # for now, handler_exception_coverage is cross-cutting
+_EXPECTED_TOOLS = (
+    "supercoder_plan",
+    "supercoder_read_window",
+    "supercoder_patch",
+    "supercoder_cursor_map",
+    "supercoder_syntax_gate",
+    "supercoder_lint_gate",
+    "supercoder_repo_map",
+    "supercoder_test_gate",
+    "supercoder_brief",
+    "supercoder_doctor",
+)
+
+
+@_register("hermes_contract_tool_registration")
+def hermes_contract_tool_registration(ctx: DoctorContext) -> tuple[str, str]:
+    try:
+        from cluxion_agentplugin_supercoder.plugin import register
+
+        class _MockCtx:
+            def __init__(self) -> None:
+                self.tools: list[tuple[str, str, dict, object, str]] = []
+
+            def register_tool(
+                self,
+                *,
+                name: str,
+                toolset: str,
+                schema: dict,
+                handler: object,
+                emoji: str,
+            ) -> None:
+                self.tools.append((name, toolset, schema, handler, emoji))
+
+        mock = _MockCtx()
+        register(mock)
+        registered = [name for name, *_ in mock.tools]
+        missing = [name for name in _EXPECTED_TOOLS if name not in registered]
+        if missing:
+            return "fail", f"missing tools: {', '.join(missing)}"
+        extras = [name for name in registered if name not in _EXPECTED_TOOLS]
+        if extras:
+            return "fail", f"unexpected tools: {', '.join(extras)}"
+        for name, toolset, schema, handler, _emoji in mock.tools:
+            if toolset != "supercoder":
+                return "fail", f"{name}: toolset={toolset!r}"
+            if not isinstance(schema, dict) or not schema.get("name"):
+                return "fail", f"{name}: invalid schema"
+            if not callable(handler):
+                return "fail", f"{name}: handler not callable"
+        return "pass", f"{len(_EXPECTED_TOOLS)} tools registered with schemas and handlers"
+    except Exception as e:
+        return "fail", f"registration error: {e}"
+
+
 @_register("handler_exception_coverage")
 def handler_exception_coverage(ctx: DoctorContext) -> tuple[str, str]:
     try:

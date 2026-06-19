@@ -223,6 +223,82 @@ def test_path_security_probe_detects_ungated_read(monkeypatch):
     assert status == "fail"
 
 
+def test_healthy_install_ok_and_exit_zero(monkeypatch):
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.doctor.probes.shutil.which",
+        lambda name: "/usr/bin/hermes" if name == "hermes" else None,
+    )
+
+    def fake_run(cmd, **_kwargs):
+        joined = " ".join(cmd)
+        if "--version" in joined:
+            return subprocess.CompletedProcess(cmd, 0, "Hermes Agent v1.0.0", "")
+        if "--help" in joined:
+            return subprocess.CompletedProcess(cmd, 0, "-z --oneshot", "")
+        if "tools" in joined and "list" in joined:
+            return subprocess.CompletedProcess(cmd, 0, "supercoder", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.doctor.framework.subprocess.run",
+        fake_run,
+    )
+    cat = _catalog_path()
+    result = run_doctor(
+        cwd=Path.cwd(),
+        catalog_path=cat,
+        probes=PROBES,
+        plugin="supercoder",
+        version="0.2.4",
+    )
+    statuses = {c.check_id: c.status for c in result.checks}
+    assert statuses["hermes_contract_tool_registration"] == "pass"
+    assert result.ok is True
+    assert result.summary == "ok"
+    payload = json.loads(render_json(result))
+    assert payload["ok"] is True
+
+    from cluxion_agentplugin_supercoder.cli import main
+
+    assert main(["doctor"]) == 0
+
+
+def test_genuine_failure_still_degraded_exit_one(monkeypatch):
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.doctor.probes.shutil.which",
+        lambda name: "/usr/bin/hermes" if name == "hermes" else None,
+    )
+
+    def fake_run(cmd, **_kwargs):
+        joined = " ".join(cmd)
+        if "--version" in joined:
+            return subprocess.CompletedProcess(cmd, 0, "Hermes Agent v1.0.0", "")
+        if "--help" in joined:
+            return subprocess.CompletedProcess(cmd, 0, "-z --oneshot", "")
+        if "tools" in joined and "list" in joined:
+            return subprocess.CompletedProcess(cmd, 1, "", "tools unavailable")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.doctor.framework.subprocess.run",
+        fake_run,
+    )
+    result = run_doctor(
+        cwd=Path.cwd(),
+        catalog_path=_catalog_path(),
+        probes=PROBES,
+        plugin="supercoder",
+        version="0.2.4",
+    )
+    statuses = {c.check_id: c.status for c in result.checks}
+    assert statuses["toolset_valid"] == "fail"
+    assert result.ok is False
+
+    from cluxion_agentplugin_supercoder.cli import main
+
+    assert main(["doctor"]) == 1
+
+
 def test_hermes_workspace_probe_detects_ungated_read(monkeypatch):
     from cluxion_agentplugin_supercoder.core.safety import SafetyDecision
     from cluxion_agentplugin_supercoder.doctor.probes import hermes_context_workspace_root

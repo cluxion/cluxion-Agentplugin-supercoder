@@ -43,13 +43,17 @@ def build_repo_map(
     base = Path(root).resolve()
     if not base.is_dir():
         return {"ok": False, "error": f"root is not a directory: {base}"}
-    entries = rust_bridge.scan_repo(base, max_files=max(1, int(max_files)))
+    capped_max_files = max(1, int(max_files))
+    entries = rust_bridge.scan_repo(base, max_files=capped_max_files)
+    total_candidates = rust_bridge.count_scan_candidates(base)
+    files_capped = max(0, total_candidates - capped_max_files)
     entries = _rank_entries(entries)
 
     lines: list[str] = []
     used = 0
     files_mapped = 0
-    files_omitted = 0
+    files_omitted = files_capped
+    budget_exhausted = False
     outlined_files = 0
     symbol_total = 0
     budget = max(200, int(budget_chars))
@@ -57,7 +61,7 @@ def build_repo_map(
     for entry in entries:
         rel = str(entry.get("path", ""))
         total_lines = int(entry.get("total_lines", 0))
-        if files_omitted:  # budget already exhausted: only count the rest
+        if budget_exhausted:
             files_omitted += 1
             continue
         block = [f"{rel} ({total_lines}L)"]
@@ -80,6 +84,7 @@ def build_repo_map(
         block_text = "\n".join(block)
         if used + len(block_text) + 1 > budget:
             files_omitted += 1
+            budget_exhausted = True
             continue
         lines.append(block_text)
         used += len(block_text) + 1
@@ -90,7 +95,7 @@ def build_repo_map(
         "root": str(base),
         "backend": rust_bridge.resolve_backend(),
         "map": "\n".join(lines),
-        "files_scanned": len(entries),
+        "files_scanned": len(entries) + files_capped,
         "files_mapped": files_mapped,
         "files_omitted": files_omitted,
         "outlined_files": outlined_files,
