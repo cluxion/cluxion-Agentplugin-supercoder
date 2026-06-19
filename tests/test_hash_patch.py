@@ -158,6 +158,24 @@ def test_concurrent_patches_no_lost_update(tmp_path: Path) -> None:
     assert new_hash != file_hash(initial)
 
 
+def test_concurrent_patches_no_lost_update_stress(tmp_path: Path) -> None:
+    """50 iterations of 8 concurrent workers: zero lost updates across all runs."""
+    for _ in range(50):
+        path = tmp_path / "concurrent_stress.py"
+        initial = "\n".join(f"# UNIQUE_PATCH_{i}_START" for i in range(8)) + "\n"
+        path.write_text(initial, encoding="utf-8")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(_worker_apply, i, path) for i in range(8)]
+            successes = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+        assert all(successes), "Some patches lost due to race"
+        final = path.read_text(encoding="utf-8")
+        for i in range(8):
+            assert f"# UNIQUE_PATCH_{i}_DONE" in final
+            assert f"# UNIQUE_PATCH_{i}_START" not in final
+
+
 def test_atomic_write_interruption_leaves_original_intact(tmp_path: Path) -> None:
     """Simulated mid-write crash leaves ORIGINAL file intact (temp may remain, no truncate)."""
     path = tmp_path / "atomic_test.txt"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -19,14 +20,22 @@ DEFAULT_FUZZY_THRESHOLD = 0.86
 MAX_CONTEXT_SCAN = 8
 MAX_LINE_DRIFT = 2
 
+_thread_fallback_lock = threading.Lock()
+
+
+def _lock_path(path: Path) -> Path:
+    return path.parent / f".{path.name}.cluxion-lock"
+
 
 @contextmanager
 def _exclusive_lock(path: Path):
-    """Exclusive advisory lock on target file (fcntl.flock). Graceful degrade on non-POSIX."""
-    if fcntl is None or not path.exists():
-        yield
+    """Exclusive advisory lock on stable sidecar file (fcntl.flock). Graceful degrade on non-POSIX."""
+    if fcntl is None:
+        with _thread_fallback_lock:
+            yield
         return
-    fd = os.open(str(path), os.O_RDWR)
+    lock_path = _lock_path(path)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
