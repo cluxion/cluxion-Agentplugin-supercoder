@@ -1,5 +1,5 @@
 name: cluxion-agentplugin-supercoder
-version: 0.2.11
+version: 0.2.12
 description: "Universal agent coding harness: cursor, safe patch, line budget, Rust index."
 author: cluxion
 kind: standalone

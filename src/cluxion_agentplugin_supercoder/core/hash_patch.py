@@ -17,6 +17,7 @@ except ImportError:
     fcntl = None  # type: ignore[assignment]
 
 DEFAULT_FUZZY_THRESHOLD = 0.86
+AMBIGUITY_MARGIN = 0.015
 MAX_CONTEXT_SCAN = 8
 MAX_LINE_DRIFT = 2
 
@@ -157,6 +158,8 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
+    sm = SequenceMatcher(autojunk=False)
+    sm.set_seq2(reference)
     for start, end, block in _candidate_spans(text, reference, MAX_LINE_DRIFT):
         # compute line range [start_line, end_line) for overlap test
         start_line = 0
@@ -165,12 +168,17 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
         end_line = start_line
         while end_line < len(offsets) - 1 and offsets[end_line] < end:
             end_line += 1
-        score = SequenceMatcher(None, block, reference, autojunk=False).ratio()
+        sm.set_seq1(block)
+        if best is not None:
+            prune_below = best[3] - AMBIGUITY_MARGIN
+            if sm.real_quick_ratio() < prune_below or sm.quick_ratio() < prune_below:
+                continue
+        score = sm.ratio()
         if best is None or score > best[3]:
             best = (start, end, block, score)
             best_lines = (start_line, end_line)
             ambiguous = False
-        elif score >= DEFAULT_FUZZY_THRESHOLD and best and abs(score - best[3]) < 0.015:
+        elif score >= DEFAULT_FUZZY_THRESHOLD and best and abs(score - best[3]) < AMBIGUITY_MARGIN:
             # only treat as ambiguous if a genuinely different (non-overlapping) location matches closely
             if best_lines is not None and not (end_line <= best_lines[0] or start_line >= best_lines[1]):
                 continue  # overlapping window on same location -> not real ambiguity

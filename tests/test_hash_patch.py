@@ -4,11 +4,112 @@ import concurrent.futures
 import contextlib
 import os
 import tempfile
+import time
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pytest
 
-from cluxion_agentplugin_supercoder.core.hash_patch import apply_patch, file_hash
+from cluxion_agentplugin_supercoder.core.hash_patch import (
+    AMBIGUITY_MARGIN,
+    DEFAULT_FUZZY_THRESHOLD,
+    MAX_LINE_DRIFT,
+    _best_fuzzy_span,
+    _candidate_spans,
+    apply_patch,
+    file_hash,
+)
+
+
+def _best_fuzzy_span_legacy(text: str, reference: str) -> tuple[int, int, str, float, bool] | None:
+    """Pre-optimization reference implementation for byte-identical regression checks."""
+    best: tuple[int, int, str, float] | None = None
+    best_lines: tuple[int, int] | None = None
+    ambiguous = False
+    lines = text.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+    for start, end, block in _candidate_spans(text, reference, MAX_LINE_DRIFT):
+        start_line = 0
+        while start_line < len(offsets) - 1 and offsets[start_line + 1] <= start:
+            start_line += 1
+        end_line = start_line
+        while end_line < len(offsets) - 1 and offsets[end_line] < end:
+            end_line += 1
+        score = SequenceMatcher(None, block, reference, autojunk=False).ratio()
+        if best is None or score > best[3]:
+            best = (start, end, block, score)
+            best_lines = (start_line, end_line)
+            ambiguous = False
+        elif score >= DEFAULT_FUZZY_THRESHOLD and best and abs(score - best[3]) < AMBIGUITY_MARGIN:
+            if best_lines is not None and not (end_line <= best_lines[0] or start_line >= best_lines[1]):
+                continue
+            ambiguous = True
+    if best is None:
+        return None
+    return best[0], best[1], best[2], best[3], ambiguous
+
+
+def _fuzzy_result_key(result: tuple[int, int, str, float, bool] | None) -> tuple | None:
+    if result is None:
+        return None
+    start, end, _block, score, ambiguous = result
+    return (start, end, score, ambiguous)
+
+
+@pytest.mark.parametrize(
+    ("text", "reference"),
+    [
+        pytest.param(
+            "\n".join(f"line_{i} = {i}" for i in range(20))
+            + "\n"
+            + "def target():\n    return 42\n"
+            + "\n".join(f"tail_{i} = {i}" for i in range(20))
+            + "\n",
+            "def target():\n    return 43\n",
+            id="exact-best-in-middle",
+        ),
+        pytest.param(
+            "def f():\n    return 1\n\n" + "def f():\n    return 1\n",
+            "def f():\n    return 2\n",
+            id="ambiguous-near-ties",
+        ),
+        pytest.param(
+            "alpha\nbeta\ngamma\ndelta\n",
+            "alpha\nBETA\ngamma\n",
+            id="clear-single-best",
+        ),
+        pytest.param(
+            "alpha\nbeta\ngamma\n",
+            "completely different content\n",
+            id="no-match",
+        ),
+    ],
+)
+def test_best_fuzzy_span_matches_legacy(text: str, reference: str) -> None:
+    legacy = _fuzzy_result_key(_best_fuzzy_span_legacy(text, reference))
+    optimized = _fuzzy_result_key(_best_fuzzy_span(text, reference))
+    assert optimized == legacy
+
+
+def test_best_fuzzy_span_large_file_benchmark() -> None:
+    """Optimized path should be materially faster on a ~500-line fuzzy search."""
+    filler = "\n".join(f"# filler line {i:03d} with some padding text" for i in range(480)) + "\n"
+    target = "def handler(request):\n    value = compute(request)\n    return value\n"
+    text = filler + target + filler
+    reference = "def handler(request):\n    value = compute(request)  # cached\n    return value\n"
+
+    legacy_start = time.perf_counter()
+    legacy = _best_fuzzy_span_legacy(text, reference)
+    legacy_elapsed = time.perf_counter() - legacy_start
+
+    optimized_start = time.perf_counter()
+    optimized = _best_fuzzy_span(text, reference)
+    optimized_elapsed = time.perf_counter() - optimized_start
+
+    assert _fuzzy_result_key(optimized) == _fuzzy_result_key(legacy)
+    assert optimized_elapsed < legacy_elapsed * 0.6
 
 
 def test_exact_patch(tmp_path: Path) -> None:
