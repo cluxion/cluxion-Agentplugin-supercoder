@@ -77,6 +77,8 @@ def apply_patch(
     expected_file_hash: str = "",
     fuzzy_threshold: float = DEFAULT_FUZZY_THRESHOLD,
 ) -> PatchResult:
+    if not old_text:
+        return _failed(str(path), "empty_old_text", expected_file_hash, "old_text must be non-empty")
     if not path.exists():
         return _failed(str(path), "missing_file", expected_file_hash, "file not found")
     with _exclusive_lock(path):
@@ -120,6 +122,8 @@ def _normalize_hash(value: str) -> str:
 
 
 def _exact_spans(text: str, needle: str) -> list[tuple[int, int]]:
+    if not needle:
+        return []
     spans: list[tuple[int, int]] = []
     offset = 0
     while True:
@@ -131,6 +135,8 @@ def _exact_spans(text: str, needle: str) -> list[tuple[int, int]]:
 
 
 def _candidate_spans(text: str, reference: str, line_drift: int) -> list[tuple[int, int, str]]:
+    if not reference:
+        return []
     lines = text.splitlines(keepends=True)
     if not lines:
         return []
@@ -151,6 +157,8 @@ def _candidate_spans(text: str, reference: str, line_drift: int) -> list[tuple[i
 
 
 def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, bool] | None:
+    if not reference:
+        return None
     best: tuple[int, int, str, float] | None = None
     best_lines: tuple[int, int] | None = None
     ambiguous = False

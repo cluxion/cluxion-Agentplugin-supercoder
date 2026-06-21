@@ -16,6 +16,7 @@ from cluxion_agentplugin_supercoder.core.hash_patch import (
     MAX_LINE_DRIFT,
     _best_fuzzy_span,
     _candidate_spans,
+    _exact_spans,
     apply_patch,
     file_hash,
 )
@@ -110,6 +111,32 @@ def test_best_fuzzy_span_large_file_benchmark() -> None:
 
     assert _fuzzy_result_key(optimized) == _fuzzy_result_key(legacy)
     assert optimized_elapsed < legacy_elapsed * 0.6
+
+
+def test_exact_spans_empty_needle_returns_immediately() -> None:
+    assert _exact_spans("hello", "") == []
+
+
+def test_apply_patch_empty_old_text_fails_fast(tmp_path: Path) -> None:
+    path = tmp_path / "a.py"
+    path.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    start = time.perf_counter()
+    result = apply_patch(path, old_text="", new_text="INSERT\n")
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0
+    assert result.success is False
+    assert result.strategy == "empty_old_text"
+    assert "non-empty" in result.message
+    assert path.read_text(encoding="utf-8") == "alpha\nbeta\ngamma\n"
+
+
+def test_empty_reference_does_not_hang_fuzzy_path() -> None:
+    text = "\n".join(f"line_{i} = {i}" for i in range(500)) + "\n"
+    start = time.perf_counter()
+    assert _candidate_spans(text, "", MAX_LINE_DRIFT) == []
+    assert _best_fuzzy_span(text, "") is None
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0
 
 
 def test_exact_patch(tmp_path: Path) -> None:
