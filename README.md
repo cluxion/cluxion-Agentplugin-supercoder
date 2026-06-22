@@ -50,6 +50,14 @@ cluxion-supercoder doctor --json   # 구조화 출력
 
 Hermes 안에서는 `supercoder_doctor` 도구로도 노출됩니다.
 
+## Hermes 슬래시 커맨드 (0.2.14+)
+
+```
+/supercoder-doctor
+```
+
+`/` 입력 시 🔌로 표시 · CLI `cluxion-supercoder doctor`와 동일.
+
 ## 라이선스
 
 Apache-2.0
@@ -104,6 +112,14 @@ cluxion-supercoder doctor --json   # structured output
 ```
 
 Also exposed inside Hermes as the `supercoder_doctor` tool.
+
+## Hermes slash commands (0.2.14+)
+
+```
+/supercoder-doctor
+```
+
+Shows in `/` autocomplete with 🔌 · same as `cluxion-supercoder doctor`.
 
 ## License
 
