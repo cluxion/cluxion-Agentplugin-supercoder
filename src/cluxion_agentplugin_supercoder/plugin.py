@@ -113,6 +113,19 @@ def register(ctx: object) -> None:
         emoji="🩺",
     )
 
+    register_command = getattr(ctx, "register_command", None)
+    if callable(register_command):
+
+        def _slash_supercoder_doctor(raw_args: str) -> str:
+            del raw_args
+            return _handle_supercoder_doctor({})
+
+        register_command(
+            "supercoder-doctor",
+            _slash_supercoder_doctor,
+            description="Run supercoder plugin doctor checks",
+        )
+
 
 def _wrap(callback: Callable[[dict[str, object]], runner.ToolResult]) -> Callable[[dict[str, object]], str]:
     def handler(args: dict[str, object], **_: object) -> str:
