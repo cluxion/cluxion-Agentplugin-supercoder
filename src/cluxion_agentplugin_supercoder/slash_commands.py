@@ -22,9 +22,12 @@ Examples:
 
 Notes:
   - Patches are hash-verified; empty old_text is rejected immediately
-  - Repo map is attached to the plan when available
+  - Slash dispatch skips repo_map (fast); agent calls supercoder_plan for map
   - Diagnostics: /supercoder-doctor
 """
+
+# Hermes Desktop gateway RPC times out at 30s; repo_map on large cwds can exceed that.
+_SLASH_PLAN_KWARGS: dict[str, object] = {"repo_map": False}
 
 
 def build_supercoder_directive(task: str, plan_payload: dict[str, object]) -> str:
@@ -34,7 +37,7 @@ def build_supercoder_directive(task: str, plan_payload: dict[str, object]) -> st
         "Use the supercoder toolset for all code changes in this task.\n\n"
         f"Task: {task}\n\n"
         "Required sequence:\n"
-        "1. Use the supercoder_plan result below (do not skip repo_map)\n"
+        "1. Use the plan below; call supercoder_plan for a fresh repo_map if needed\n"
         "2. supercoder_read_window before each edit\n"
         "3. supercoder_patch only with verified old_text hashes\n"
         "4. supercoder_syntax_gate → supercoder_lint_gate → supercoder_test_gate after edits\n"
@@ -49,7 +52,9 @@ def handle_supercoder(raw_args: str, ctx: object | None = None) -> str:
     if not task or task.lower() in {"help", "-h", "--help"}:
         return SUPERCODER_HELP
     try:
-        result = runner.plan({"prompt": task, "cwd": str(Path.cwd())})
+        result = runner.plan(
+            {"prompt": task, "cwd": str(Path.cwd()), **_SLASH_PLAN_KWARGS},
+        )
         payload = json.loads(result.to_json())
         if not payload.get("ok"):
             return f"supercoder error: {payload.get('error', 'plan failed')}"
