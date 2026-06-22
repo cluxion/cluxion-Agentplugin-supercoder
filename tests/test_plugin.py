@@ -11,12 +11,23 @@ def test_register_exposes_all_tools() -> None:
     class FakeCtx:
         def __init__(self):
             self.tools = {}
+            self.commands = {}
 
         def register_tool(self, name, toolset=None, schema=None, handler=None, emoji=None):
             self.tools[name] = {"toolset": toolset, "schema": schema}
 
+        def register_command(self, name, handler, description="", args_hint="", deliver="output"):
+            self.commands[name] = {
+                "handler": handler,
+                "description": description,
+                "args_hint": args_hint,
+                "deliver": deliver,
+            }
+
     ctx = FakeCtx()
     plugin.register(ctx)
+    assert "supercoder" in ctx.commands
+    assert "supercoder-doctor" in ctx.commands
     assert sorted(ctx.tools) == [
         "supercoder_brief",
         "supercoder_cursor_map",

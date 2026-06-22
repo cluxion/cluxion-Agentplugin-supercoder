@@ -16,6 +16,7 @@ from cluxion_agentplugin_supercoder.schemas import (
     SYNTAX_GATE_SCHEMA,
     TEST_GATE_SCHEMA,
 )
+from cluxion_agentplugin_supercoder.slash_commands import handle_supercoder
 
 
 def register(ctx: object) -> None:
@@ -116,10 +117,20 @@ def register(ctx: object) -> None:
     register_command = getattr(ctx, "register_command", None)
     if callable(register_command):
 
+        def _slash_supercoder(raw_args: str) -> str:
+            return handle_supercoder(raw_args, ctx)
+
         def _slash_supercoder_doctor(raw_args: str) -> str:
             del raw_args
             return _handle_supercoder_doctor({})
 
+        register_command(
+            "supercoder",
+            _slash_supercoder,
+            description="Supercoder coding mode — plan, verified patches, test gates",
+            args_hint="<task>",
+            deliver="agent",
+        )
         register_command(
             "supercoder-doctor",
             _slash_supercoder_doctor,

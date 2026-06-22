@@ -50,13 +50,19 @@ cluxion-supercoder doctor --json   # 구조화 출력
 
 Hermes 안에서는 `supercoder_doctor` 도구로도 노출됩니다.
 
-## Hermes 슬래시 커맨드 (0.2.14+)
+## Hermes 슬래시 커맨드 (0.2.15+)
 
 ```
+/supercoder fix failing auth tests and run gates
 /supercoder-doctor
 ```
 
-`/` 입력 시 🔌로 표시 · CLI `cluxion-supercoder doctor`와 동일.
+| 슬래시 | 용도 |
+|---|---|
+| `/supercoder <task>` | 슈퍼코더 코딩 모드 — plan + repo map을 에이전트에 전달 |
+| `/supercoder-doctor` | doctor (CLI와 동일) |
+
+`/` 입력 시 `/super`로 필터 가능 · `deliver=agent`로 작업 지시가 에이전트 턴에 전달됩니다.
 
 ## 라이선스
 
@@ -113,13 +119,19 @@ cluxion-supercoder doctor --json   # structured output
 
 Also exposed inside Hermes as the `supercoder_doctor` tool.
 
-## Hermes slash commands (0.2.14+)
+## Hermes slash commands (0.2.15+)
 
 ```
+/supercoder fix failing auth tests and run gates
 /supercoder-doctor
 ```
 
-Shows in `/` autocomplete with 🔌 · same as `cluxion-supercoder doctor`.
+| Slash | Purpose |
+|---|---|
+| `/supercoder <task>` | Supercoder coding mode — plan + repo map sent to the agent |
+| `/supercoder-doctor` | Run doctor (same as CLI) |
+
+Filter with `/super` · uses `deliver=agent` so the harness directive becomes the next agent turn.
 
 ## License
 
