@@ -50,7 +50,7 @@ cluxion-supercoder doctor --json   # 구조화 출력
 
 Hermes 안에서는 `supercoder_doctor` 도구로도 노출됩니다.
 
-## Slash commands and marketplace plugins (0.2.17+)
+## Slash commands and marketplace plugins (0.2.18+)
 
 ```
 /supercoder fix failing auth tests and run gates
@@ -126,7 +126,7 @@ cluxion-supercoder doctor --json   # structured output
 
 Also exposed inside Hermes as the `supercoder_doctor` tool.
 
-## Slash commands and marketplace plugins (0.2.17+)
+## Slash commands and marketplace plugins (0.2.18+)
 
 ```
 /supercoder fix failing auth tests and run gates

@@ -5,7 +5,7 @@ Supercoder가 **현재 제공하는** 기능입니다.
 ## Hermes 연동
 
 - Plugin entry + `supercoder` toolset
-- Tools (9): `supercoder_plan`, `supercoder_repo_map`, `supercoder_read_window`, `supercoder_patch`, `supercoder_cursor_map`, `supercoder_syntax_gate`, `supercoder_lint_gate`, `supercoder_test_gate`, `supercoder_brief`
+- Tools (10): `supercoder_plan`, `supercoder_repo_map`, `supercoder_read_window`, `supercoder_patch`, `supercoder_cursor_map`, `supercoder_syntax_gate`, `supercoder_lint_gate`, `supercoder_test_gate`, `supercoder_brief`, `supercoder_doctor`
 
 ## Core (Python)
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -107,19 +109,32 @@ def load_catalog(catalog_path: Path) -> tuple[CatalogEntry, ...]:
             elif val is not None:
                 data[f] = val
         if "check_id" in data:
-            entries.append(CatalogEntry(**data))  # type: ignore[arg-type]
+            entries.append(CatalogEntry(**data))
     return tuple(entries)
 
 
 def _make_runner(timeout: float = 8.0) -> Callable[[list[str]], subprocess.CompletedProcess]:
+    # Per-run memoization: identical probe commands within one doctor run share
+    # a result, but nothing survives across runs (a process-global cache would
+    # go stale in long-lived plugin hosts and break test monkeypatching).
+    cache: dict[tuple[str, ...], subprocess.CompletedProcess[str]] = {}
+    lock = threading.Lock()
+
     def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            cmd,
+        key = tuple(cmd)
+        with lock:
+            if key in cache:
+                return cache[key]
+        result = subprocess.run(
+            list(cmd),
             capture_output=True,
             text=True,
             timeout=timeout,
             stdin=subprocess.DEVNULL,
         )
+        with lock:
+            cache.setdefault(key, result)
+            return cache[key]
 
     return _run
 
@@ -135,8 +150,9 @@ def run_doctor(
 ) -> DoctorResult:
     catalog = load_catalog(catalog_path)
     ctx = DoctorContext(cwd=cwd, hermes_bin=hermes_bin, run=_make_runner())
-    results: list[CheckResult] = []
-    for entry in catalog:
+    max_workers = min(8, max(1, len(catalog)))
+
+    def run_one(entry: CatalogEntry) -> CheckResult:
         if entry.check_id in probes:
             try:
                 status, detail = probes[entry.check_id](ctx)
@@ -144,15 +160,16 @@ def run_doctor(
                 status, detail = "fail", f"probe raised {type(e).__name__}: {e}"
         else:
             status, detail = "skip", "no probe registered"
-        results.append(
-            CheckResult(
-                check_id=entry.check_id,
-                category=entry.category,
-                severity=entry.severity,
-                status=status,
-                detail=detail,
-            )
+        return CheckResult(
+            check_id=entry.check_id,
+            category=entry.category,
+            severity=entry.severity,
+            status=status,
+            detail=detail,
         )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(run_one, catalog))
     results.sort(key=lambda c: (SEVERITY_RANK.get(c.severity, 9), c.check_id))
     return DoctorResult(plugin=plugin, version=version, checks=tuple(results))
 

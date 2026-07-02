@@ -17,6 +17,20 @@ from cluxion_agentplugin_supercoder.schemas import (
 )
 from cluxion_agentplugin_supercoder.slash_commands import handle_supercoder
 
+CORE_TOOL_NAMES = (
+    "supercoder_plan",
+    "supercoder_read_window",
+    "supercoder_patch",
+    "supercoder_cursor_map",
+    "supercoder_syntax_gate",
+    "supercoder_lint_gate",
+    "supercoder_repo_map",
+    "supercoder_test_gate",
+    "supercoder_brief",
+)
+DOCTOR_TOOL_NAME = "supercoder_doctor"
+REGISTERED_TOOL_NAMES = (*CORE_TOOL_NAMES, DOCTOR_TOOL_NAME)
+
 
 def register(ctx: object) -> None:
     ctx.register_tool(
@@ -97,7 +111,7 @@ def register(ctx: object) -> None:
             return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, sort_keys=True)
 
     DOCTOR_SCHEMA = {
-        "name": "supercoder_doctor",
+        "name": DOCTOR_TOOL_NAME,
         "description": "Run embedded diagnostics for supercoder plugin (hermes contract, install integrity, native, etc.)",
         "parameters": {
             "type": "object",
@@ -106,7 +120,7 @@ def register(ctx: object) -> None:
         },
     }
     ctx.register_tool(
-        name="supercoder_doctor",
+        name=DOCTOR_TOOL_NAME,
         toolset="supercoder",
         schema=DOCTOR_SCHEMA,
         handler=_handle_supercoder_doctor,
@@ -148,4 +162,4 @@ def _wrap(callback: Callable[[dict[str, object]], runner.ToolResult]) -> Callabl
     return handler
 
 
-__all__ = ["register"]
+__all__ = ["CORE_TOOL_NAMES", "DOCTOR_TOOL_NAME", "REGISTERED_TOOL_NAMES", "register"]

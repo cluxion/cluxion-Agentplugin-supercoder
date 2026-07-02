@@ -28,18 +28,7 @@ def test_register_exposes_all_tools() -> None:
     plugin.register(ctx)
     assert "supercoder" in ctx.commands
     assert "supercoder-doctor" in ctx.commands
-    assert sorted(ctx.tools) == [
-        "supercoder_brief",
-        "supercoder_cursor_map",
-        "supercoder_doctor",
-        "supercoder_lint_gate",
-        "supercoder_patch",
-        "supercoder_plan",
-        "supercoder_read_window",
-        "supercoder_repo_map",
-        "supercoder_syntax_gate",
-        "supercoder_test_gate",
-    ]
+    assert sorted(ctx.tools) == sorted(plugin.REGISTERED_TOOL_NAMES)
     assert {tool["toolset"] for tool in ctx.tools.values()} == {"supercoder"}
 
 

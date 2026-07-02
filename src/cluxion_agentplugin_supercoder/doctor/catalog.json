@@ -375,7 +375,7 @@
     "check_id": "hermes_contract_tool_registration",
     "category": "hermes_contract",
     "severity": "critical",
-    "what_it_checks": "Whether the plugin correctly registers 9 tools with Hermes via ctx.register_tool() in plugin.register(). Tools must have correct schemas, handlers, and emoji.",
+    "what_it_checks": "Whether the plugin correctly registers every tool named by plugin.REGISTERED_TOOL_NAMES with Hermes via ctx.register_tool() in plugin.register(). Tools must have correct schemas, handlers, and emoji.",
     "failure_symptom": "Tools not available in Hermes CLI. Tool calls fail with 'unknown tool' error. Schema validation rejects arguments.",
     "likely_causes": [
       "plugin.register() not called by Hermes entry point",
@@ -390,8 +390,8 @@
       "Validate schemas: python -c \"from cluxion_agentplugin_supercoder.schemas import *; import json; print(json.dumps(PLAN_SCHEMA, indent=2))\"",
       "Check Hermes loads plugin: cluxion-supercoder check — should return plugin=cluxion-agentplugin-supercoder"
     ],
-    "change_robust": "Call register() with a mock Hermes context and verify all 9 tools are registered. Test each tool's handler via _wrap(). Validate schemas against JSON schema spec.",
-    "detection_method": "Check plugin.py register() function: grep -c 'ctx.register_tool' src/cluxion_agentplugin_supercoder/plugin.py — should be exactly 9 (plan, read_window, patch, cursor_map, syntax_gate, lint_gate, repo_map, test_gate, brief). Verify schemas match runners: grep SCHEMA src/cluxion_agentplugin_supercoder/schemas.py | wc -l — should be 9."
+    "change_robust": "Call register() with a mock Hermes context and verify every name in plugin.REGISTERED_TOOL_NAMES is registered. Test each tool's handler via _wrap(). Validate schemas against JSON schema spec.",
+    "detection_method": "Check plugin.REGISTERED_TOOL_NAMES, then call plugin.register() with a mock context and compare the registered names to that tuple."
   },
   {
     "check_id": "hermes_context_workspace_root",

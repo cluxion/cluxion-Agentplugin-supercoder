@@ -2,8 +2,10 @@
 
 import json
 import subprocess
+import time
 from pathlib import Path
 
+from cluxion_agentplugin_supercoder import plugin
 from cluxion_agentplugin_supercoder.doctor import (
     DoctorResult,
     render_json,
@@ -94,6 +96,29 @@ def test_probe_exception_becomes_fail():
     )
     statuses = {c.check_id: c.status for c in result.checks}
     assert statuses["hermes_on_path"] == "fail"
+
+
+def test_run_doctor_runs_probes_in_parallel():
+    probes = {}
+    for check_id in ("hermes_on_path", "hermes_version", "hermes_oneshot_flag"):
+
+        def probe(ctx, check_id=check_id):
+            time.sleep(0.05)
+            return "pass", check_id
+
+        probes[check_id] = probe
+
+    start = time.perf_counter()
+    result = run_doctor(
+        cwd=Path.cwd(),
+        catalog_path=_catalog_path(),
+        probes=probes,
+        plugin="supercoder",
+        version="0.2.4",
+    )
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.13
+    assert {c.check_id: c.status for c in result.checks}["hermes_on_path"] == "pass"
 
 
 def test_warn_only_is_ok():
@@ -253,6 +278,8 @@ def test_healthy_install_ok_and_exit_zero(monkeypatch):
     )
     statuses = {c.check_id: c.status for c in result.checks}
     assert statuses["hermes_contract_tool_registration"] == "pass"
+    details = {c.check_id: c.detail for c in result.checks}
+    assert details["hermes_contract_tool_registration"].startswith(f"{len(plugin.REGISTERED_TOOL_NAMES)} tools ")
     assert result.ok is True
     assert result.summary == "ok"
     payload = json.loads(render_json(result))

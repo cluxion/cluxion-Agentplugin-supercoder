@@ -2,6 +2,14 @@
 
 연결된 AI가 호출하는 `supercoder` toolset입니다.
 
+## CLI
+
+```bash
+cluxion-supercoder check
+```
+
+설치된 패키지 버전, Rust index 사용 가능 여부, 선택된 index backend를 JSON으로 출력합니다.
+
 ## `supercoder_plan`
 
 코딩 task를 WorkUnit 큐로 분해합니다. Coding plan에는 compact repo map (files + top-level symbols)이 포함됩니다.

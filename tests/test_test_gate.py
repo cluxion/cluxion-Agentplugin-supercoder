@@ -143,3 +143,12 @@ def test_default_detection_uses_project_marker(tmp_path: Path) -> None:
     payload = suggest_test_commands([], cwd=tmp_path)
     assert payload["command"] == "cargo test -q"
     assert payload["source"] == "project_default"
+
+
+def test_test_gate_does_not_create_workspace_artifacts(tmp_path: Path) -> None:
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_core.py").write_text("def test_ok(): pass\n", encoding="utf-8")
+    payload = suggest_test_commands(["core.py"], cwd=tmp_path)
+    assert payload["ok"] is True
+    assert not (tmp_path / ".cluxion-test-dispatch").exists()
+    assert not list(tmp_path.glob(".cluxion-test-dispatch*"))
