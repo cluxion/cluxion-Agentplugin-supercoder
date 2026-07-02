@@ -1,0 +1,15 @@
+{
+  "name": "cluxion",
+  "description": "Cluxion agent plugins marketplace",
+  "owner": {
+    "name": "cluxion"
+  },
+  "plugins": [
+    {
+      "name": "cluxion-agentplugin-supercoder",
+      "description": "Deterministic coding harness for host agents: plan, read-window, patch, gates, brief.",
+      "version": "0.2.17",
+      "source": "./"
+    }
+  ]
+}
