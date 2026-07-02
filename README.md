@@ -50,7 +50,7 @@ cluxion-supercoder doctor --json   # 구조화 출력
 
 Hermes 안에서는 `supercoder_doctor` 도구로도 노출됩니다.
 
-## Hermes 슬래시 커맨드 (0.2.15+)
+## Slash commands and marketplace plugins (0.2.17+)
 
 ```
 /supercoder fix failing auth tests and run gates
@@ -63,6 +63,13 @@ Hermes 안에서는 `supercoder_doctor` 도구로도 노출됩니다.
 | `/supercoder-doctor` | doctor (CLI와 동일) |
 
 `/` 입력 시 `/super`로 필터 가능 · `deliver=agent`로 작업 지시가 에이전트 턴에 전달됩니다.
+
+Codex와 Claude Code는 루트 plugin artifact를 설치합니다:
+
+```bash
+codex plugin marketplace add cluxion-local /path/to/cluxion-Agentplugin-supercoder
+codex plugin add cluxion-agentplugin-supercoder@cluxion-local
+```
 
 ## 라이선스
 
@@ -119,7 +126,7 @@ cluxion-supercoder doctor --json   # structured output
 
 Also exposed inside Hermes as the `supercoder_doctor` tool.
 
-## Hermes slash commands (0.2.15+)
+## Slash commands and marketplace plugins (0.2.17+)
 
 ```
 /supercoder fix failing auth tests and run gates
@@ -132,6 +139,13 @@ Also exposed inside Hermes as the `supercoder_doctor` tool.
 | `/supercoder-doctor` | Run doctor (same as CLI) |
 
 Filter with `/super` · uses `deliver=agent` so the harness directive becomes the next agent turn.
+
+Codex and Claude Code install from the root plugin artifact:
+
+```bash
+codex plugin marketplace add cluxion-local /path/to/cluxion-Agentplugin-supercoder
+codex plugin add cluxion-agentplugin-supercoder@cluxion-local
+```
 
 ## License
 

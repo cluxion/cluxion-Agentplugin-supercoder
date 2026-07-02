@@ -1,7 +1,32 @@
 # Agent Surfaces
 
-Supercoder는 Hermes plugin + `supercoder` toolset으로 연결됩니다.  
-**연결된 AI**가 코딩 task에서 `supercoder_*` 도구를 호출합니다.
+Supercoder uses one root plugin artifact for Codex and Claude Code, plus the existing Hermes
+entry point. Every surface calls the same `cluxion-supercoder` JSON contracts.
+
+## Codex
+
+Codex uses the root marketplace artifact:
+
+```bash
+codex plugin marketplace add cluxion-local /path/to/cluxion-Agentplugin-supercoder
+codex plugin add cluxion-agentplugin-supercoder@cluxion-local
+```
+
+Files:
+
+- `.codex-plugin/plugin.json`
+- `commands/`
+- `skills/supercoder/SKILL.md`
+
+No `[plugins.<name>] command = [...]` schema exists.
+
+## Claude Code
+
+Claude Code uses the same root layout:
+
+- `.claude-plugin/plugin.json`
+- `commands/`
+- `skills/supercoder/SKILL.md`
 
 ## Hermes
 
@@ -9,16 +34,15 @@ Supercoder는 Hermes plugin + `supercoder` toolset으로 연결됩니다.
 hermes plugins enable cluxion-agentplugin-supercoder
 ```
 
-Tools (9): `supercoder_plan`, `supercoder_repo_map`, `supercoder_read_window`, `supercoder_patch`, `supercoder_cursor_map`, `supercoder_syntax_gate`, `supercoder_lint_gate`, `supercoder_test_gate`, `supercoder_brief`
+Hermes registers the `supercoder` toolset through `hermes_agent.plugins`.
 
-## Claude / Codex / Grok
+Tools (10): `supercoder_plan`, `supercoder_repo_map`, `supercoder_read_window`, `supercoder_patch`,
+`supercoder_cursor_map`, `supercoder_syntax_gate`, `supercoder_lint_gate`, `supercoder_test_gate`,
+`supercoder_brief`, `supercoder_doctor`
 
-동일 tool semantics를 skill·CLI로 안내합니다.  
-코딩 bounded read·patch·evidence 규칙은 Hermes와 같습니다.
+## Host Agent Rules
 
-## 연결된 AI 규칙
-
-1. 코딩 요청만 `supercoder_plan` — 그 외 `bypass`
-2. patch 전 `read_window`로 hash 확보
-3. 테스트는 host terminal 실행 후 brief에 evidence 기록
-4. stale·blocked 시 사용자에게 명시적 보고
+1. Run `cluxion-supercoder plan --json-stdin` only for coding requests; respect `mode=bypass`.
+2. Run `read-window` before each patch and use the returned `file_hash`.
+3. Run suggested tests in the host terminal and record evidence in `brief`.
+4. Report stale cursors, retry exhaustion, and blocked checks honestly.

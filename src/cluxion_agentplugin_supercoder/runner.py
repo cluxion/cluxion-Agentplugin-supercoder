@@ -11,6 +11,7 @@ from cluxion_agentplugin_supercoder.core.hash_patch import apply_patch
 from cluxion_agentplugin_supercoder.core.line_budget import budget_for, is_coding_task
 from cluxion_agentplugin_supercoder.core.queue import plan_coding_task
 from cluxion_agentplugin_supercoder.core.safety import pre_tool_gate
+from cluxion_agentplugin_supercoder.core.test_gate import suggest_test_commands
 
 
 def _int(v: object, default: int) -> int:
@@ -199,8 +200,35 @@ def repo_map_tool(payload: Mapping[str, object]) -> ToolResult:
     return ToolResult(bool(result.get("ok", False)), {key: value for key, value in result.items() if key != "ok"})
 
 
+def test_gate_tool(payload: Mapping[str, object]) -> ToolResult:
+    raw_files = payload.get("files_changed", [])
+    files_changed = [str(item) for item in raw_files] if isinstance(raw_files, list) else []
+    cwd_raw = str(payload.get("cwd", ".")).strip() or "."
+    body = suggest_test_commands(
+        files_changed,
+        command=str(payload.get("command", "")).strip() or None,
+        cwd=Path(cwd_raw).expanduser().resolve(),
+    )
+    return ToolResult(bool(body.get("ok", False)), {key: value for key, value in body.items() if key != "ok"})
+
+
+def brief_tool(payload: Mapping[str, object]) -> ToolResult:
+    return ToolResult(
+        True,
+        {
+            "brief": {
+                "files_changed": payload.get("files_changed", []),
+                "tests_run": payload.get("tests_run", []),
+                "verification_status": payload.get("verification_status", "unknown_after_check"),
+                "remaining_risks": payload.get("remaining_risks", []),
+            },
+        },
+    )
+
+
 __all__ = [
     "ToolResult",
+    "brief_tool",
     "cursor_map_tool",
     "lint_gate_tool",
     "patch_tool",
@@ -208,4 +236,5 @@ __all__ = [
     "read_window_tool",
     "repo_map_tool",
     "syntax_gate_tool",
+    "test_gate_tool",
 ]
