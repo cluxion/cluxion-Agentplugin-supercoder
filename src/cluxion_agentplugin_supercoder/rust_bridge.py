@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 INDEX_BIN_ENV = "CLUXION_SUPERCODER_INDEX_BIN"
@@ -21,10 +22,27 @@ DEFAULT_MAX_FILES = 256
 SKIP_DIRS = {".git", "node_modules", ".venv", "dist", "target"}
 DEFAULT_EXTENSIONS = (".py", ".rs", ".ts", ".tsx", ".js", ".go", ".md", ".toml", ".yaml", ".yml")
 
-try:
-    import supercoder_index_native as _native
-except ImportError:
-    _native = None
+_native: object | None = None
+_native_resolved = False
+_fallback_warned = False
+
+
+def _load_native() -> object | None:
+    """Import the native extension on first use, not at module load.
+
+    The wheel import costs 100-300ms; --help and pure-python commands
+    should never pay it.
+    """
+    global _native, _native_resolved
+    if not _native_resolved:
+        _native_resolved = True
+        try:
+            import supercoder_index_native
+
+            _native = supercoder_index_native
+        except ImportError:
+            _native = None
+    return _native
 
 
 def resolve_backend() -> str:
@@ -32,7 +50,7 @@ def resolve_backend() -> str:
     forced = os.environ.get(INDEX_BACKEND_ENV, "").strip().lower()
     if forced in ("native", "subprocess", "python"):
         return forced
-    if _native is not None:
+    if _load_native() is not None:
         return "native"
     if shutil.which(_binary()) is not None:
         return "subprocess"
@@ -62,16 +80,30 @@ def scan_repo(
     else:
         try:
             result = _invoke_native("scan", payload) if backend == "native" else _invoke_subprocess("scan", payload)
-        except Exception:
+        except Exception as exc:
+            _warn_fallback(backend, exc)
             result = _py_scan(root, max_files=max_files, extensions=extensions)
     entries = result.get("entries")
     return entries if isinstance(entries, list) else []
 
 
+def _warn_fallback(backend: str, exc: Exception) -> None:
+    """Graceful degradation stays, but silently 5x-slower scans do not."""
+    global _fallback_warned
+    if not _fallback_warned:
+        _fallback_warned = True
+        print(
+            f"cluxion-supercoder: {backend} index backend failed ({type(exc).__name__}: {exc}); "
+            "falling back to the slower python scanner for this process",
+            file=sys.stderr,
+        )
+
+
 def _invoke_native(command: str, payload: dict[str, object]) -> dict[str, object]:
-    if _native is None:
+    native = _load_native()
+    if native is None:
         raise RuntimeError("native backend forced but supercoder_index_native is not importable")
-    raw = _native.run(command, json.dumps(payload, ensure_ascii=False))
+    raw = native.run(command, json.dumps(payload, ensure_ascii=False))
     return _parse_backend_json(raw, command)
 
 

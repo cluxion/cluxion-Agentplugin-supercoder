@@ -45,8 +45,13 @@ def build_repo_map(
         return {"ok": False, "error": f"root is not a directory: {base}"}
     capped_max_files = max(1, int(max_files))
     entries = rust_bridge.scan_repo(base, max_files=capped_max_files)
-    total_candidates = rust_bridge.count_scan_candidates(base)
-    files_capped = max(0, total_candidates - capped_max_files)
+    if len(entries) < capped_max_files:
+        # Cap not reached, so the scan already saw every candidate:
+        # skip the second full tree walk that count_scan_candidates costs.
+        files_capped = 0
+    else:
+        total_candidates = rust_bridge.count_scan_candidates(base)
+        files_capped = max(0, total_candidates - capped_max_files)
     entries = _rank_entries(entries)
 
     lines: list[str] = []

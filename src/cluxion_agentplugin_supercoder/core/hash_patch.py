@@ -25,7 +25,12 @@ _thread_fallback_lock = threading.Lock()
 
 
 def _lock_path(path: Path) -> Path:
-    return path.parent / f".{path.name}.cluxion-lock"
+    # Same absolute target path -> same lock file, but outside the user tree:
+    # patch runs used to leave .<name>.cluxion-lock litter in the workspace.
+    digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:32]
+    lock_dir = Path(tempfile.gettempdir()) / "cluxion-supercoder-locks"
+    lock_dir.mkdir(mode=0o700, exist_ok=True)
+    return lock_dir / f"{digest}.lock"
 
 
 @contextmanager

@@ -29,11 +29,16 @@ def _is_test_file(path: Path) -> bool:
     return path.suffix == ".py" and (path.stem.startswith("test_") or path.stem.endswith("_test"))
 
 
+_TEST_SNIFF_BYTES = 65536
+
+
 def _looks_like_test(full: Path) -> bool:
     # Name alone is not proof (a source module can be called test_gate.py);
     # hints are line-start anchored so words inside string literals do not count.
+    # The sniff is capped so a pathological generated file cannot stall the gate.
     try:
-        text = full.read_text(encoding="utf-8")
+        with full.open("r", encoding="utf-8", errors="strict") as handle:
+            text = handle.read(_TEST_SNIFF_BYTES)
     except (OSError, UnicodeDecodeError):
         return False
     return any(line.lstrip().startswith(_TEST_HINTS) for line in text.splitlines())
