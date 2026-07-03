@@ -44,7 +44,11 @@ def build_repo_map(
     if not base.is_dir():
         return {"ok": False, "error": f"root is not a directory: {base}"}
     capped_max_files = max(1, int(max_files))
-    entries = rust_bridge.scan_repo(base, max_files=capped_max_files)
+    scan = rust_bridge.scan_repo_result(base, max_files=capped_max_files)
+    if not scan.get("ok", False):
+        return scan
+    entries = scan.get("entries")
+    entries = entries if isinstance(entries, list) else []
     if len(entries) < capped_max_files:
         # Cap not reached, so the scan already saw every candidate:
         # skip the second full tree walk that count_scan_candidates costs.
@@ -98,7 +102,8 @@ def build_repo_map(
     return {
         "ok": True,
         "root": str(base),
-        "backend": rust_bridge.resolve_backend(),
+        "backend": scan.get("backend", rust_bridge.resolve_backend()),
+        **({"fallback_from": scan["fallback_from"]} if "fallback_from" in scan else {}),
         "map": "\n".join(lines),
         "files_scanned": len(entries) + files_capped,
         "files_mapped": files_mapped,

@@ -70,3 +70,12 @@ def test_read_window_tool_allows_normal_in_workspace_file(tmp_path: Path) -> Non
     result = runner.read_window_tool({"cwd": str(tmp_path), "path": "sample.py"})
     assert result.ok is True
     assert "print('ok')" in str(result.payload["content"])
+
+
+@pytest.mark.parametrize("field", ["start_line", "max_lines"])
+def test_read_window_tool_rejects_non_positive_bounds(tmp_path: Path, field: str) -> None:
+    path = tmp_path / "sample.py"
+    path.write_text("print('ok')\n", encoding="utf-8")
+    result = runner.read_window_tool({"cwd": str(tmp_path), "path": "sample.py", field: 0})
+    assert result.ok is False
+    assert result.payload == {"error": "invalid_request", "message": f"{field} must be >= 1", "hint": "Pass a positive integer."}

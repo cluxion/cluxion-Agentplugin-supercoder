@@ -25,4 +25,6 @@ def test_cli_reports_bad_json_stdin(monkeypatch, capsys) -> None:
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
-    assert "invalid JSON" in payload["error"]
+    assert payload["error"] == "invalid_json"
+    assert "invalid JSON" in payload["message"]
+    assert payload["hint"]

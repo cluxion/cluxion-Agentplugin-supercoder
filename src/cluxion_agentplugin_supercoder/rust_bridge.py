@@ -25,6 +25,7 @@ DEFAULT_EXTENSIONS = (".py", ".rs", ".ts", ".tsx", ".js", ".go", ".md", ".toml",
 _native: object | None = None
 _native_resolved = False
 _fallback_warned = False
+_BACKENDS = {"native", "subprocess", "python"}
 
 
 def _load_native() -> object | None:
@@ -47,8 +48,8 @@ def _load_native() -> object | None:
 
 def resolve_backend() -> str:
     """Pick the best available backend, honoring the env override."""
-    forced = os.environ.get(INDEX_BACKEND_ENV, "").strip().lower()
-    if forced in ("native", "subprocess", "python"):
+    forced = _forced_backend()
+    if forced is not None:
         return forced
     if _load_native() is not None:
         return "native"
@@ -69,6 +70,18 @@ def scan_repo(
     extensions: tuple[str, ...] = DEFAULT_EXTENSIONS,
 ) -> list[dict[str, object]]:
     """Index files under root: sorted, capped, each entry {path, file_hash, total_lines}."""
+    result = scan_repo_result(root, max_files=max_files, extensions=extensions)
+    entries = result.get("entries")
+    return entries if isinstance(entries, list) else []
+
+
+def scan_repo_result(
+    root: Path,
+    *,
+    max_files: int = DEFAULT_MAX_FILES,
+    extensions: tuple[str, ...] = DEFAULT_EXTENSIONS,
+) -> dict[str, object]:
+    """Index files and return backend metadata for structured tool output."""
     payload = {
         "root": str(root),
         "max_files": max_files,
@@ -81,10 +94,22 @@ def scan_repo(
         try:
             result = _invoke_native("scan", payload) if backend == "native" else _invoke_subprocess("scan", payload)
         except Exception as exc:
+            if _forced_backend() == backend:
+                return {
+                    "ok": False,
+                    "error": "backend_unavailable",
+                    "message": f"{backend} backend is forced but unavailable: {type(exc).__name__}: {exc}",
+                    "hint": (
+                        f"Install/fix the {backend} backend or unset "
+                        f"{INDEX_BACKEND_ENV}={backend} to allow fallback."
+                    ),
+                }
             _warn_fallback(backend, exc)
             result = _py_scan(root, max_files=max_files, extensions=extensions)
-    entries = result.get("entries")
-    return entries if isinstance(entries, list) else []
+            result["fallback_from"] = backend
+    result["backend"] = "python" if result.get("fallback_from") else backend
+    result.setdefault("ok", True)
+    return result
 
 
 def _warn_fallback(backend: str, exc: Exception) -> None:
@@ -97,6 +122,11 @@ def _warn_fallback(backend: str, exc: Exception) -> None:
             "falling back to the slower python scanner for this process",
             file=sys.stderr,
         )
+
+
+def _forced_backend() -> str | None:
+    forced = os.environ.get(INDEX_BACKEND_ENV, "").strip().lower()
+    return forced if forced in _BACKENDS else None
 
 
 def _invoke_native(command: str, payload: dict[str, object]) -> dict[str, object]:
@@ -213,4 +243,5 @@ __all__ = [
     "index_available",
     "resolve_backend",
     "scan_repo",
+    "scan_repo_result",
 ]

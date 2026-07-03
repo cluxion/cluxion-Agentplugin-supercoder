@@ -108,3 +108,12 @@ def test_lint_gate_rejects_directory(tmp_path: Path) -> None:
     res_tool = runner.lint_gate_tool({"cwd": str(tmp_path), "path": "emptydir"})
     assert res_tool.ok is False
     assert res_tool.payload.get("error") == "path is a directory"
+
+
+def test_lint_gate_tool_accepts_files_changed(tmp_path: Path) -> None:
+    (tmp_path / "clean.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "dirty.py").write_text("import os\n", encoding="utf-8")
+    result = runner.lint_gate_tool({"cwd": str(tmp_path), "files_changed": ["clean.py", "dirty.py"]})
+    assert result.ok is True
+    assert [item["path"] for item in result.payload["files"]] == ["clean.py", "dirty.py"]
+    assert [item["clean"] for item in result.payload["files"]] == [True, False]

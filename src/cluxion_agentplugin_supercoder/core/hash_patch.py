@@ -14,7 +14,7 @@ from pathlib import Path
 try:
     import fcntl
 except ImportError:
-    fcntl = None  # type: ignore[assignment]
+    fcntl = None
 
 DEFAULT_FUZZY_THRESHOLD = 0.86
 AMBIGUITY_MARGIN = 0.015

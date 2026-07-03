@@ -148,3 +148,12 @@ def test_syntax_gate_tool_with_file(tmp_path: Path, backend: str) -> None:
     assert result.ok is True
     assert result.payload["valid"] is False
     assert result.payload["language"] == "json"
+
+
+def test_syntax_gate_tool_accepts_files_changed(tmp_path: Path, backend: str) -> None:
+    _write(tmp_path / "ok.py", "def f():\n    return 1\n")
+    _write(tmp_path / "broken.json", '{"a": 1,}')
+    result = runner.syntax_gate_tool({"cwd": str(tmp_path), "files_changed": ["ok.py", "broken.json"]})
+    assert result.ok is True
+    assert [item["path"] for item in result.payload["files"]] == ["ok.py", "broken.json"]
+    assert [item["valid"] for item in result.payload["files"]] == [True, False]

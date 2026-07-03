@@ -39,14 +39,29 @@ printf '{"cwd":"'$PWD'","path":"src/app.py","old_text":"old\\n","new_text":"new\
 ```
 
 ```bash
-printf '{"cwd":"'$PWD'","path":"src/app.py"}' | cluxion-supercoder syntax-gate --json-stdin
-printf '{"cwd":"'$PWD'","path":"src/app.py"}' | cluxion-supercoder lint-gate --json-stdin
-printf '{"cwd":"'$PWD'","files_changed":["src/app.py"]}' | cluxion-supercoder test-gate --json-stdin
+printf '{"cwd":"'$PWD'","files_changed":["src/app.py"]}' |
+  cluxion-supercoder syntax-gate --json-stdin
 ```
 
 ```json
-{"ok":true,"checked":true,"language":"python","valid":true,"error_count":0}
-{"ok":true,"checked":true,"tool":"ruff","clean":true,"finding_count":0,"truncated":false}
+{"ok":true,"files":[{"path":"src/app.py","checked":true,"language":"python","valid":true,"error_count":0,"errors":[]}]}
+```
+
+```bash
+printf '{"cwd":"'$PWD'","files_changed":["src/app.py"]}' |
+  cluxion-supercoder lint-gate --json-stdin
+```
+
+```json
+{"ok":true,"files":[{"path":"src/app.py","checked":true,"language":"python","tool":"ruff","clean":true,"finding_count":0,"findings":[],"truncated":false}]}
+```
+
+```bash
+printf '{"cwd":"'$PWD'","files_changed":["src/app.py"]}' |
+  cluxion-supercoder test-gate --json-stdin
+```
+
+```json
 {"ok":true,"mode":"suggest_or_run","command":"pytest -q tests/test_app.py","targets":["tests/test_app.py"],"files_changed":["src/app.py"],"source":"mapped_from_files_changed"}
 ```
 

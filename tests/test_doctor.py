@@ -326,6 +326,15 @@ def test_genuine_failure_still_degraded_exit_one(monkeypatch):
     assert main(["doctor"]) == 1
 
 
+def test_doctor_json_keeps_stderr_silent(capsys) -> None:
+    from cluxion_agentplugin_supercoder.cli import main
+
+    assert main(["doctor", "--json"]) in (0, 1)
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["plugin"] == "supercoder"
+    assert captured.err == ""
+
+
 def test_hermes_workspace_probe_detects_ungated_read(monkeypatch):
     from cluxion_agentplugin_supercoder.core.safety import SafetyDecision
     from cluxion_agentplugin_supercoder.doctor.probes import hermes_context_workspace_root

@@ -21,13 +21,35 @@ def _int(v: object, default: int) -> int:
         return default
 
 
+def _invalid(message: str, hint: str) -> ToolResult:
+    return ToolResult(False, {"error": "invalid_request", "message": message, "hint": hint})
+
+
+def _files_changed(payload: Mapping[str, object]) -> list[str] | None:
+    raw = payload.get("files_changed")
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError("files_changed must be a list")
+    return [str(item) for item in raw if str(item).strip()]
+
+
+def _without_ok(check: Mapping[str, object]) -> dict[str, object]:
+    return {key: value for key, value in check.items() if key != "ok"}
+
+
 @dataclass(frozen=True)
 class ToolResult:
     ok: bool
     payload: dict[str, object]
 
     def to_json(self) -> str:
-        return json.dumps({"ok": self.ok, **self.payload}, ensure_ascii=False, sort_keys=True)
+        body = {"ok": self.ok, **self.payload}
+        if not self.ok:
+            body.setdefault("error", "command_failed")
+            body.setdefault("message", str(body["error"]))
+            body.setdefault("hint", "Check the request payload and retry.")
+        return json.dumps(body, ensure_ascii=False, sort_keys=True)
 
 
 def _workspace(payload: Mapping[str, object]) -> Path:
@@ -66,7 +88,9 @@ def plan(payload: Mapping[str, object]) -> ToolResult:
         )
         if mapped.get("ok"):
             body["repo_map"] = {
-                key: mapped[key] for key in ("map", "files_mapped", "files_omitted", "truncated", "backend")
+                key: mapped[key]
+                for key in ("map", "files_mapped", "files_omitted", "truncated", "backend", "fallback_from")
+                if key in mapped
             }
     return ToolResult(True, body)
 
@@ -84,6 +108,10 @@ def read_window_tool(payload: Mapping[str, object]) -> ToolResult:
         return ToolResult(False, {"error": gate.reason})
     start = _int(payload.get("start_line", 1), 1)
     max_lines = _int(payload.get("max_lines", 120), 120)
+    if start < 1:
+        return _invalid("start_line must be >= 1", "Pass a positive integer.")
+    if max_lines < 1:
+        return _invalid("max_lines must be >= 1", "Pass a positive integer.")
     decision = budget_for("inspect", requested_lines=max_lines)
     if not decision.allowed:
         return ToolResult(False, {"error": decision.reason, "max_lines": decision.max_lines})
@@ -166,17 +194,36 @@ def cursor_map_tool(payload: Mapping[str, object]) -> ToolResult:
 
 def lint_gate_tool(payload: Mapping[str, object]) -> ToolResult:
     rel = str(payload.get("path", "")).strip()
+    root = _workspace(payload)
+    files = _files_changed(payload)
+    if not rel and files is not None:
+        results: list[dict[str, object]] = []
+        ok = True
+        for item in files:
+            check = lint_gate.check_file(root / item, cwd=root)
+            ok = ok and bool(check.get("ok", False))
+            results.append({"path": item, **_without_ok(check)})
+        return ToolResult(ok, {"files": results})
     if not rel:
         raise ValueError("path is required")
-    root = _workspace(payload)
     check = lint_gate.check_file(root / rel, cwd=root)
-    return ToolResult(bool(check.get("ok", False)), {key: value for key, value in check.items() if key != "ok"})
+    return ToolResult(bool(check.get("ok", False)), _without_ok(check))
 
 
 def syntax_gate_tool(payload: Mapping[str, object]) -> ToolResult:
     content = payload.get("content")
     rel = str(payload.get("path", "")).strip()
     language = str(payload.get("language", "")).strip() or None
+    files = _files_changed(payload)
+    if content is None and not rel and files is not None:
+        root = _workspace(payload)
+        results: list[dict[str, object]] = []
+        ok = True
+        for item in files:
+            check = syntax_gate.check_source(path=root / item, language=language)
+            ok = ok and bool(check.get("ok", False))
+            results.append({"path": item, **_without_ok(check)})
+        return ToolResult(ok, {"files": results})
     if content is None and not rel:
         raise ValueError("content or path is required")
     check = syntax_gate.check_source(
@@ -184,7 +231,7 @@ def syntax_gate_tool(payload: Mapping[str, object]) -> ToolResult:
         content=str(content) if content is not None else None,
         language=language,
     )
-    return ToolResult(bool(check.get("ok", False)), {key: value for key, value in check.items() if key != "ok"})
+    return ToolResult(bool(check.get("ok", False)), _without_ok(check))
 
 
 def repo_map_tool(payload: Mapping[str, object]) -> ToolResult:
@@ -197,7 +244,7 @@ def repo_map_tool(payload: Mapping[str, object]) -> ToolResult:
         ),
         budget_chars=_int(payload.get("budget_chars", repo_map.DEFAULT_BUDGET_CHARS), repo_map.DEFAULT_BUDGET_CHARS),
     )
-    return ToolResult(bool(result.get("ok", False)), {key: value for key, value in result.items() if key != "ok"})
+    return ToolResult(bool(result.get("ok", False)), _without_ok(result))
 
 
 def test_gate_tool(payload: Mapping[str, object]) -> ToolResult:

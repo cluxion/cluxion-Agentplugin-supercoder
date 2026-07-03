@@ -159,6 +159,31 @@ def test_missing_root_is_an_error() -> None:
     assert "root" in result["error"]
 
 
+def test_forced_unavailable_backend_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "native")
+    monkeypatch.setattr(rust_bridge, "_load_native", lambda: None)
+    result = runner.repo_map_tool({"cwd": str(tmp_path)})
+    assert result.ok is False
+    assert result.payload["error"] == "backend_unavailable"
+    assert "CLUXION_SUPERCODER_BACKEND=native" in result.payload["hint"]
+
+
+def test_auto_backend_fallback_reports_honest_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "app.py").write_text("print('ok')\n", encoding="utf-8")
+
+    class BrokenNative:
+        def run(self, _command: str, _payload: str) -> str:
+            raise RuntimeError("boom")
+
+    monkeypatch.delenv(rust_bridge.INDEX_BACKEND_ENV, raising=False)
+    monkeypatch.setattr(rust_bridge, "_load_native", lambda: BrokenNative())
+    result = runner.repo_map_tool({"cwd": str(tmp_path)})
+    assert result.ok is True
+    assert result.payload["backend"] == "python"
+    assert result.payload["fallback_from"] == "native"
+
+
 def test_runner_tool_wraps_result(backend: str, sample_repo: Path) -> None:
     result = runner.repo_map_tool({"cwd": str(sample_repo)})
     assert result.ok is True

@@ -27,8 +27,8 @@ READ_WINDOW_SCHEMA = {
         "type": "object",
         "properties": {
             "path": {"type": "string"},
-            "start_line": {"type": "integer", "default": 1},
-            "max_lines": {"type": "integer", "default": 120},
+            "start_line": {"type": "integer", "minimum": 1, "default": 1},
+            "max_lines": {"type": "integer", "minimum": 1, "default": 120},
             "cwd": {"type": "string"},
         },
         "required": ["path"],
@@ -68,6 +68,11 @@ SYNTAX_GATE_SCHEMA = {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "File to check (relative to cwd)."},
+            "files_changed": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Files to check and aggregate when path/content is not supplied.",
+            },
             "content": {"type": "string", "description": "Snippet to check instead of a file."},
             "language": {
                 "type": "string",
@@ -85,9 +90,13 @@ LINT_GATE_SCHEMA = {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "File to lint (relative to cwd)."},
+            "files_changed": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Files to lint and aggregate when path is not supplied.",
+            },
             "cwd": {"type": "string"},
         },
-        "required": ["path"],
     },
 }
 
