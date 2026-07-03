@@ -30,7 +30,7 @@ printf '{"cwd":"'$PWD'","path":"src/app.py","start_line":1,"max_lines":40}' |
 ```
 
 ```bash
-printf '{"cwd":"'$PWD'","path":"src/app.py","old_text":"old\\n","new_text":"new\\n","expected_file_hash":"sha256:..."}' |
+printf '{"cwd":"'$PWD'","path":"src/app.py","old_text":"old\\n","new_text":"new\\n","expected_hash":"sha256:..."}' |
   cluxion-supercoder patch --json-stdin
 ```
 

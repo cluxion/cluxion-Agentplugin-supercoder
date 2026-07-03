@@ -24,7 +24,7 @@ If the result is `mode=bypass`, continue without Supercoder. If the result is `m
 
 1. Use the plan and embedded `repo_map` for orientation; call `repo-map` when more map context is needed.
 2. Call `read-window` before each edit and use the returned `file_hash`.
-3. Call `patch` with exact `old_text`, `new_text`, and `expected_file_hash`.
+3. Call `patch` with exact `old_text`, `new_text`, and `expected_hash` (alias: `expected_file_hash`).
 4. Call `syntax-gate`, `lint-gate`, and `test-gate`; the host must run any suggested tests in the terminal.
 5. Call `brief` with `files_changed`, `tests_run`, `verification_status`, and remaining risks.
 
@@ -53,7 +53,7 @@ printf '{"cwd":"<workspace>","path":"src/app.py","start_line":1,"max_lines":40}'
 ```
 
 ```bash
-printf '{"cwd":"<workspace>","path":"src/app.py","old_text":"old\\n","new_text":"new\\n","expected_file_hash":"sha256:..."}' |
+printf '{"cwd":"<workspace>","path":"src/app.py","old_text":"old\\n","new_text":"new\\n","expected_hash":"sha256:..."}' |
   cluxion-supercoder patch --json-stdin
 ```
 

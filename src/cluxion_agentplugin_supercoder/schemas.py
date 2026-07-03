@@ -45,6 +45,7 @@ PATCH_SCHEMA = {
             "old_text": {"type": "string"},
             "new_text": {"type": "string"},
             "expected_file_hash": {"type": "string"},
+            "expected_hash": {"type": "string", "description": "Alias of expected_file_hash (matches the result field name)"},
             "syntax_gate": {
                 "type": "boolean",
                 "default": True,

@@ -143,7 +143,7 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
             target,
             old_text=old_text,
             new_text=str(payload.get("new_text", "")),
-            expected_file_hash=str(payload.get("expected_file_hash", "")),
+            expected_file_hash=_expected_hash_from(payload),
         )
     except UnicodeDecodeError as exc:
         return ToolResult(False, {"error": f"file is not valid UTF-8: {exc}"})
@@ -285,3 +285,10 @@ __all__ = [
     "syntax_gate_tool",
     "test_gate_tool",
 ]
+
+
+def _expected_hash_from(payload: dict[str, object]) -> str:
+    """Accept both spellings: input docs used expected_file_hash while the
+    result object says expected_hash, and hosts mirroring the output name
+    silently lost stale-write protection."""
+    return str(payload.get("expected_hash") or payload.get("expected_file_hash") or "")
