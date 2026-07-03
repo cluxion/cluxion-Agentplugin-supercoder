@@ -147,6 +147,7 @@ def _invoke_subprocess(command: str, payload: dict[str, object]) -> dict[str, ob
         text=True,
         capture_output=True,
         check=False,
+        timeout=30.0,
     )
     if completed.returncode != 0:
         stdout = completed.stdout.strip()

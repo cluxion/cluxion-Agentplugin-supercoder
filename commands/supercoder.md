@@ -58,7 +58,7 @@ printf '{"cwd":"'$PWD'","files_changed":["src/app.py"]}' |
 
 ```bash
 printf '{"cwd":"'$PWD'","files_changed":["src/app.py"]}' |
-  cluxion-supercoder test-gate --json-stdin
+  cluxion-supercoder test-gate --json-stdin   # suggest-only: returns the test command to run, not per-file pass/fail (the HOST runs the tests)
 ```
 
 ```json

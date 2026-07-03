@@ -37,7 +37,7 @@ cluxion-supercoder cursor-map --json-stdin
 cluxion-supercoder repo-map --json-stdin
 cluxion-supercoder syntax-gate --json-stdin
 cluxion-supercoder lint-gate --json-stdin
-cluxion-supercoder test-gate --json-stdin
+cluxion-supercoder test-gate --json-stdin   # suggest-only: returns the test command to run, not per-file pass/fail (the HOST runs the tests)
 cluxion-supercoder brief --json-stdin
 ```
 
