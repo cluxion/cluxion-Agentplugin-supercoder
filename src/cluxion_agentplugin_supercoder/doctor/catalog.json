@@ -115,6 +115,7 @@
       "native package not installed"
     ],
     "fix_steps": [
+      "Build+install the native backend: cd <plugin-root> && uv pip install ./rust/supercoder_index --python .venv/bin/python (or pip install ./rust/supercoder_index)",
       "Run: python -c 'import supercoder_index_native'",
       "If ImportError, reinstall the bundled wheel; fallback keeps working meanwhile"
     ],

@@ -150,3 +150,13 @@ codex plugin add cluxion-agentplugin-supercoder@cluxion-local
 ## License
 
 Apache-2.0
+
+## Native backend (optional, faster)
+
+The Rust backend is not built automatically. After install, run once:
+
+```bash
+uv pip install ./rust/supercoder_index --python .venv/bin/python
+```
+
+Without it the plugin falls back to a slower pure-Python path (`doctor` reports `native_module_importable`).
