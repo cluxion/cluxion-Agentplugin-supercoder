@@ -250,6 +250,76 @@ def test_duplicate_blocks_still_ambiguous(tmp_path: Path) -> None:
     assert result.strategy == "no_match"
 
 
+# === Order-independence of the ambiguity gate ===
+
+_NEAR_TIE_OLD = "def compute_total(values):\n    total = sum(values) + offset_marker_a\n    return total\n"
+_NEAR_TIE_BETTER = _NEAR_TIE_OLD.replace("offset_marker_a", "offset_marker_b")  # 1-char drift
+_NEAR_TIE_WORSE = _NEAR_TIE_OLD.replace("offset_marker_a", "offset_marker_zz")  # 2-char drift
+# long filler lines keep wider windows (block + neighbor line) far below the margin,
+# so the two exact-width block windows are the only near-tie candidates
+_NEAR_TIE_FILLER = (
+    "# header section with plenty of padding text to dilute wider candidate windows\n"
+    "import math  # extra trailing comment padding so this line is long too\n",
+    "# unrelated middle separator with plenty of padding text between the blocks\n"
+    "CONSTANT = 12345  # extra trailing comment padding so this line is long too\n",
+    "# trailer line with plenty of padding characters to dilute wider windows\n",
+)
+
+
+def _near_tie_content(better_first: bool, worse: str = _NEAR_TIE_WORSE) -> str:
+    top, mid, end = _NEAR_TIE_FILLER
+    first, second = (_NEAR_TIE_BETTER, worse) if better_first else (worse, _NEAR_TIE_BETTER)
+    return top + first + mid + second + end
+
+
+def test_near_tie_blocks_are_a_genuine_near_tie() -> None:
+    # guard: if these constants drift out of the margin the ordering tests degenerate
+    s_better = SequenceMatcher(None, _NEAR_TIE_BETTER, _NEAR_TIE_OLD, autojunk=False).ratio()
+    s_worse = SequenceMatcher(None, _NEAR_TIE_WORSE, _NEAR_TIE_OLD, autojunk=False).ratio()
+    assert s_better >= DEFAULT_FUZZY_THRESHOLD
+    assert s_worse >= DEFAULT_FUZZY_THRESHOLD
+    assert 0 < s_better - s_worse < AMBIGUITY_MARGIN
+
+
+@pytest.mark.parametrize("better_first", [True, False], ids=["better-first", "better-last"])
+def test_near_tie_ambiguity_refuses_in_both_orderings(better_first: bool, tmp_path: Path) -> None:
+    # regression: the decision used to flip with candidate order — applied when the
+    # better match was scanned later, refused when it was scanned first
+    content = _near_tie_content(better_first)
+    assert sorted(content) == sorted(_near_tie_content(not better_first))  # same bytes, reordered
+    path = tmp_path / "a.py"
+    path.write_text(content, encoding="utf-8")
+    result = apply_patch(
+        path,
+        old_text=_NEAR_TIE_OLD,
+        new_text="def compute_total(values):\n    return sum(values)\n",
+    )
+    assert result.success is False
+    assert result.strategy == "no_match"
+    assert path.read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("better_first", [True, False], ids=["better-first", "better-last"])
+def test_clear_winner_above_margin_applies_in_both_orderings(better_first: bool, tmp_path: Path) -> None:
+    # positive control: runner-up beyond the margin must NOT trip the gate, either order
+    clear_worse = _NEAR_TIE_OLD.replace("offset_marker_a", "unrelated_zz_qq")
+    s_better = SequenceMatcher(None, _NEAR_TIE_BETTER, _NEAR_TIE_OLD, autojunk=False).ratio()
+    s_worse = SequenceMatcher(None, clear_worse, _NEAR_TIE_OLD, autojunk=False).ratio()
+    assert s_worse >= DEFAULT_FUZZY_THRESHOLD
+    assert s_better - s_worse >= AMBIGUITY_MARGIN
+    content = _near_tie_content(better_first, worse=clear_worse)
+    path = tmp_path / "a.py"
+    path.write_text(content, encoding="utf-8")
+    new = "def compute_total(values):\n    return sum(values)\n"
+    result = apply_patch(path, old_text=_NEAR_TIE_OLD, new_text=new)
+    assert result.success is True
+    assert result.strategy == "fuzzy"
+    updated = path.read_text(encoding="utf-8")
+    assert new in updated
+    assert _NEAR_TIE_BETTER not in updated  # the better block was replaced
+    assert clear_worse in updated  # the runner-up untouched
+
+
 # === Concurrency and atomicity tests ===
 
 

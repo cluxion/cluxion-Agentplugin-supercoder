@@ -166,7 +166,11 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
         return None
     best: tuple[int, int, str, float] | None = None
     best_lines: tuple[int, int] | None = None
-    ambiguous = False
+    # Ambiguity must be decided after the full scan: judging against the
+    # running best is order-dependent (a later, better match would reset the
+    # flag and silently apply). Collect every candidate that clears the fuzzy
+    # threshold, then compare against the final winner.
+    contenders: list[tuple[float, int, int]] = []
     lines = text.splitlines(keepends=True)
     offsets = [0]
     for line in lines:
@@ -190,14 +194,16 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
         if best is None or score > best[3]:
             best = (start, end, block, score)
             best_lines = (start_line, end_line)
-            ambiguous = False
-        elif score >= DEFAULT_FUZZY_THRESHOLD and best and abs(score - best[3]) < AMBIGUITY_MARGIN:
-            # only treat as ambiguous if a genuinely different (non-overlapping) location matches closely
-            if best_lines is not None and not (end_line <= best_lines[0] or start_line >= best_lines[1]):
-                continue  # overlapping window on same location -> not real ambiguity
-            ambiguous = True
-    if best is None:
+        if score >= DEFAULT_FUZZY_THRESHOLD:
+            contenders.append((score, start_line, end_line))
+    if best is None or best_lines is None:
         return None
+    # ambiguous iff a genuinely different (non-overlapping) location scores within
+    # the margin of the final winner; the winner overlaps itself, so it never counts
+    ambiguous = any(
+        best[3] - score < AMBIGUITY_MARGIN and (end_line <= best_lines[0] or start_line >= best_lines[1])
+        for score, start_line, end_line in contenders
+    )
     return best[0], best[1], best[2], best[3], ambiguous
 
 
