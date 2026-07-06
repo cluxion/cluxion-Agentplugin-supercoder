@@ -112,6 +112,9 @@ def _run_json_command(command: str, json_stdin: bool) -> int:
     except json.JSONDecodeError as exc:
         print(_json_error("invalid_json", f"invalid JSON stdin: {exc.msg}", "Pass a JSON object on stdin."))
         return 2
+    except UnicodeDecodeError:
+        print(_json_error("invalid_json", "invalid JSON stdin: not valid UTF-8", "Pass UTF-8 encoded JSON on stdin."))
+        return 2
     except RecursionError:
         print(_json_error("invalid_json", "invalid JSON stdin: nesting too deep", "Reduce JSON nesting depth."))
         return 2
