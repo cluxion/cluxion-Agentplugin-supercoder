@@ -1,5 +1,5 @@
 ---
-name: cluxion-supercoder
+name: supercoder
 description: Use Cluxion Supercoder for coding tasks that need bounded reads, hash-verified patches, syntax/lint/test gates, or evidence-based briefs.
 disable-model-invocation: true
 ---
