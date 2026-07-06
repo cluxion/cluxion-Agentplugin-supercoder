@@ -81,6 +81,20 @@ def test_rust_checked_only_with_treesitter(backend: str) -> None:
         assert result["valid"] is False
 
 
+def test_backend_failure_falls_back_to_python_tier(monkeypatch) -> None:
+    def boom(command: str, payload: dict[str, object]) -> dict[str, object]:
+        raise RuntimeError("backend down")
+
+    monkeypatch.setattr(rust_bridge, "resolve_backend", lambda: "subprocess")
+    monkeypatch.setattr(rust_bridge, "_invoke_subprocess", boom)
+    result = syntax_gate.check_source(content="def add(a, b:\n    return a + b\n", language="python")
+    assert result["checked"] is True
+    assert result["valid"] is False
+    unchecked = syntax_gate.check_source(content="fn main( {", language="rust")
+    assert unchecked["checked"] is False
+    assert unchecked["valid"] is True
+
+
 def test_language_detection() -> None:
     assert syntax_gate.language_for_path("src/app.py") == "python"
     assert syntax_gate.language_for_path("ui/View.tsx") == "tsx"

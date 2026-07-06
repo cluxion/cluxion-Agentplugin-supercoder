@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -55,10 +56,13 @@ def check_source(
         return _py_check(content, "toml")
     backend = rust_bridge.resolve_backend()
     payload: dict[str, object] = {"content": content, "language": resolved}
-    if backend == "native":
-        return rust_bridge._invoke_native("syntax-check", payload)
-    if backend == "subprocess":
-        return rust_bridge._invoke_subprocess("syntax-check", payload)
+    try:
+        if backend == "native":
+            return rust_bridge._invoke_native("syntax-check", payload)
+        if backend == "subprocess":
+            return rust_bridge._invoke_subprocess("syntax-check", payload)
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        pass
     return _py_check(content, resolved)
 
 

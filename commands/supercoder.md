@@ -16,7 +16,7 @@ stdin:
 {"prompt":"$ARGUMENTS","cwd":"$PWD"}
 ```
 
-Use the JSON contract to decide whether the task is a coding task. If `mode` is `coding_queue`, follow the Supercoder workflow from the `supercoder` skill before editing.
+Use the JSON contract to decide whether the task is a coding task. If `mode` is `coding_queue`, read `${CLAUDE_PLUGIN_ROOT}/skills/supercoder/SKILL.md` and follow its Supercoder workflow before editing.
 
 Other JSON contracts:
 

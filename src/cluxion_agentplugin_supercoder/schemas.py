@@ -45,7 +45,10 @@ PATCH_SCHEMA = {
             "old_text": {"type": "string"},
             "new_text": {"type": "string"},
             "expected_file_hash": {"type": "string"},
-            "expected_hash": {"type": "string", "description": "Alias of expected_file_hash (matches the result field name)"},
+            "expected_hash": {
+                "type": "string",
+                "description": "Alias of expected_file_hash (matches the result field name)",
+            },
             "syntax_gate": {
                 "type": "boolean",
                 "default": True,
@@ -160,5 +163,32 @@ REPO_MAP_SCHEMA = {
 BRIEF_SCHEMA = {
     "name": "supercoder_brief",
     "description": "Summarize changes, verification, and remaining risks.",
-    "parameters": {"type": "object", "properties": {}},
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "files_changed": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+                "description": "Paths edited in this task.",
+            },
+            "tests_run": {
+                "type": "array",
+                "items": {"type": "object"},
+                "default": [],
+                "description": 'Commands executed with their status, e.g. {"command": ..., "status": ...}.',
+            },
+            "verification_status": {
+                "type": "string",
+                "default": "unknown_after_check",
+                "description": "Overall verification verdict.",
+            },
+            "remaining_risks": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+                "description": "Known gaps or follow-ups left open.",
+            },
+        },
+    },
 }
