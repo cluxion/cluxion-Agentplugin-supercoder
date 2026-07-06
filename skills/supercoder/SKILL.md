@@ -113,7 +113,7 @@ A failed `patch` returns `ok:false` with a `strategy` and a `retry` object
 - `syntax_reverted` — the patch applied but broke parsing, so the file was restored to its pre-patch content; fix `new_text` using the returned `syntax_errors`.
 - `missing_file` / `empty_old_text` — verify the path (`cursor-map`) / send non-empty `old_text`.
 
-Follow `retry.guidance`; never resend a failed patch unchanged. When `escalate` is true the retry budget (3) is exhausted — stop patching and re-plan a smaller edit.
+Follow `retry.guidance`; never resend a failed patch unchanged. Retry state is persisted per workspace+file (15-minute TTL, cleared on success), so the attempt budget accumulates across one-shot CLI calls. When `escalate` is true the retry budget (3) is exhausted — stop patching and re-plan a smaller edit.
 
 ## Doctor
 
