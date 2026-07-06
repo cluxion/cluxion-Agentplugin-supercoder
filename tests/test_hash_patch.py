@@ -31,7 +31,8 @@ def _best_fuzzy_span_legacy(text: str, reference: str) -> tuple[int, int, str, f
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
-    for start, end, block in _candidate_spans(text, reference, MAX_LINE_DRIFT):
+    # legacy ignores the precomputed line range and rescans offsets itself
+    for start, end, block, *_ in _candidate_spans(text, reference, MAX_LINE_DRIFT):
         start_line = 0
         while start_line < len(offsets) - 1 and offsets[start_line + 1] <= start:
             start_line += 1

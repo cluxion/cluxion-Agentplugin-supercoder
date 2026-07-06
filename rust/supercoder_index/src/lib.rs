@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
+pub mod fuzzy;
 pub mod outline;
 pub mod syntax;
 
@@ -51,6 +52,7 @@ pub fn run_command(command: &str, payload: &Value) -> Result<Value, IndexError> 
         "scan" => scan_repo(payload),
         "syntax-check" => syntax::syntax_check(payload),
         "outline" => outline::outline(payload),
+        "fuzzy_span" => fuzzy::fuzzy_span(payload),
         other => Err(IndexError(format!("unknown command: {other}"))),
     }
 }

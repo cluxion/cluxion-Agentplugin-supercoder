@@ -19,7 +19,7 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        return Err("usage: supercoder-index <hash|scan|syntax-check|outline>".into());
+        return Err("usage: supercoder-index <hash|scan|syntax-check|outline|fuzzy_span>".into());
     }
     let payload = read_stdin_json()?;
     let result = run_command(&args[1], &payload)?;

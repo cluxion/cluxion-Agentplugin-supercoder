@@ -100,8 +100,7 @@ def scan_repo_result(
                     "error": "backend_unavailable",
                     "message": f"{backend} backend is forced but unavailable: {type(exc).__name__}: {exc}",
                     "hint": (
-                        f"Install/fix the {backend} backend or unset "
-                        f"{INDEX_BACKEND_ENV}={backend} to allow fallback."
+                        f"Install/fix the {backend} backend or unset {INDEX_BACKEND_ENV}={backend} to allow fallback."
                     ),
                 }
             _warn_fallback(backend, exc)
@@ -109,6 +108,30 @@ def scan_repo_result(
             result["fallback_from"] = backend
     result["backend"] = "python" if result.get("fallback_from") else backend
     result.setdefault("ok", True)
+    return result
+
+
+def fuzzy_span_result(text: str, reference: str) -> dict[str, object] | None:
+    """Best fuzzy span via a rust backend; None means "use the python tier".
+
+    Parity with core.hash_patch._best_fuzzy_span is proven per-release by
+    tests/test_fuzzy_parity.py; any backend failure (including an older
+    binary without the fuzzy_span op) falls back silently-but-warned.
+    """
+    backend = resolve_backend()
+    if backend == "python":
+        return None
+    payload = {"text": text, "reference": reference}
+    try:
+        result = (
+            _invoke_native("fuzzy_span", payload) if backend == "native" else _invoke_subprocess("fuzzy_span", payload)
+        )
+    except Exception as exc:
+        _warn_fallback(backend, exc)
+        return None
+    if not result.get("ok", False):
+        return None
+    result["backend"] = backend
     return result
 
 
@@ -241,6 +264,7 @@ __all__ = [
     "INDEX_BACKEND_ENV",
     "INDEX_BIN_ENV",
     "count_scan_candidates",
+    "fuzzy_span_result",
     "index_available",
     "resolve_backend",
     "scan_repo",

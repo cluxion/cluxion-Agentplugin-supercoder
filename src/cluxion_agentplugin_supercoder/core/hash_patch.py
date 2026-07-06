@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from cluxion_agentplugin_supercoder import rust_bridge
+
 try:
     import fcntl
 except ImportError:
@@ -97,7 +99,7 @@ def apply_patch(
             return _commit(
                 path, text, start, end, new_text, "exact", expected_file_hash or current_hash, current_hash, 1.0
             )
-        fuzzy = _best_fuzzy_span(text, old_text)
+        fuzzy = _fuzzy_span(text, old_text)
         if fuzzy and fuzzy[3] >= fuzzy_threshold and not fuzzy[4]:
             return _commit(
                 path,
@@ -139,7 +141,9 @@ def _exact_spans(text: str, needle: str) -> list[tuple[int, int]]:
         offset = start + len(needle)
 
 
-def _candidate_spans(text: str, reference: str, line_drift: int) -> list[tuple[int, int, str]]:
+def _candidate_spans(text: str, reference: str, line_drift: int) -> list[tuple[int, int, str, int, int]]:
+    """Yield (start, end, block, start_line, end_line) — the line range comes
+    free from the enumeration, so consumers never rescan offsets per span."""
     if not reference:
         return []
     lines = text.splitlines(keepends=True)
@@ -151,14 +155,31 @@ def _candidate_spans(text: str, reference: str, line_drift: int) -> list[tuple[i
     target = max(1, len(reference.splitlines(keepends=True)))
     lower = max(1, target - line_drift)
     upper = min(len(lines), target + line_drift)
-    spans: list[tuple[int, int, str]] = []
+    spans: list[tuple[int, int, str, int, int]] = []
     for width in range(lower, upper + 1):
         for start_line in range(0, len(lines) - width + 1):
             start = offsets[start_line]
             end = offsets[start_line + width]
             block = text[start:end]
-            spans.append((start, end, block))
+            spans.append((start, end, block, start_line, start_line + width))
     return spans
+
+
+def _fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, bool] | None:
+    """Fuzzy tier routing: rust backend when available, python otherwise.
+
+    The rust op returns code-point offsets, so text[start:end] recovers the
+    matched block exactly as _best_fuzzy_span would have produced it.
+    """
+    if reference:
+        native = rust_bridge.fuzzy_span_result(text, reference)
+        if native is not None:
+            if not native.get("matched", False):
+                return None
+            start = int(native["start"])
+            end = int(native["end"])
+            return start, end, text[start:end], float(native["score"]), bool(native["ambiguous"])
+    return _best_fuzzy_span(text, reference)
 
 
 def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, bool] | None:
@@ -171,20 +192,9 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
     # flag and silently apply). Collect every candidate that clears the fuzzy
     # threshold, then compare against the final winner.
     contenders: list[tuple[float, int, int]] = []
-    lines = text.splitlines(keepends=True)
-    offsets = [0]
-    for line in lines:
-        offsets.append(offsets[-1] + len(line))
     sm = SequenceMatcher(autojunk=False)
     sm.set_seq2(reference)
-    for start, end, block in _candidate_spans(text, reference, MAX_LINE_DRIFT):
-        # compute line range [start_line, end_line) for overlap test
-        start_line = 0
-        while start_line < len(offsets) - 1 and offsets[start_line + 1] <= start:
-            start_line += 1
-        end_line = start_line
-        while end_line < len(offsets) - 1 and offsets[end_line] < end:
-            end_line += 1
+    for start, end, block, start_line, end_line in _candidate_spans(text, reference, MAX_LINE_DRIFT):
         sm.set_seq1(block)
         if best is not None:
             prune_below = best[3] - AMBIGUITY_MARGIN
