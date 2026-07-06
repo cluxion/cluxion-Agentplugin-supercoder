@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 description: Run Cluxion Supercoder planning for a coding task.
 argument-hint: "<task>"
 ---
