@@ -16,9 +16,9 @@ stdin:
 {"prompt":"$ARGUMENTS","cwd":"$PWD"}
 ```
 
-Use the JSON contract to decide whether the task is a coding task. If `mode` is `coding_queue`, read `${CLAUDE_PLUGIN_ROOT}/skills/supercoder/SKILL.md` and follow its Supercoder workflow before editing.
+Use the JSON contract to decide whether the task is a coding task. If `mode` is `coding_queue`, read `${CLAUDE_PLUGIN_ROOT}/skills/supercoder/SKILL.md` and follow its Supercoder workflow (including the failure paths) before editing.
 
-Other JSON contracts:
+Other JSON contracts (hashes in outputs are bare 64-char sha256 hex; hash inputs also accept a `sha256:` prefix):
 
 ```bash
 printf '{"cwd":"'$PWD'","path":"src/app.py","start_line":1,"max_lines":40}' |
@@ -26,16 +26,16 @@ printf '{"cwd":"'$PWD'","path":"src/app.py","start_line":1,"max_lines":40}' |
 ```
 
 ```json
-{"ok":true,"path":"src/app.py","start_line":1,"end_line":12,"content":"...","content_hash":"sha256:...","file_hash":"sha256:..."}
+{"ok":true,"path":"src/app.py","start_line":1,"end_line":12,"content":"...","content_hash":"<64-hex>","file_hash":"<64-hex>"}
 ```
 
 ```bash
-printf '{"cwd":"'$PWD'","path":"src/app.py","old_text":"old\\n","new_text":"new\\n","expected_hash":"sha256:..."}' |
+printf '{"cwd":"'$PWD'","path":"src/app.py","old_text":"old\\n","new_text":"new\\n","expected_hash":"<64-hex>"}' |
   cluxion-supercoder patch --json-stdin
 ```
 
 ```json
-{"ok":true,"file_path":"/workspace/src/app.py","strategy":"exact","message":"patched","expected_hash":"sha256:...","matched_hash":"sha256:...","similarity":1.0}
+{"ok":true,"file_path":"/workspace/src/app.py","strategy":"exact","message":"patch applied","expected_hash":"<64-hex>","matched_hash":"<64-hex>","similarity":1.0,"syntax":{"checked":true,"error_count":0,"language":"python","valid":true},"lint":{"clean":true,"finding_count":0,"tool":"ruff","truncated":false}}
 ```
 
 ```bash

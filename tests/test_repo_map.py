@@ -111,6 +111,17 @@ def test_symbol_cap_is_reported_not_silent(backend: str, tmp_path: Path) -> None
     assert "... +25 more symbols" in result["map"]
 
 
+def test_outline_symbol_cap_matches_across_backends(backend: str, tmp_path: Path) -> None:
+    # MAX_SYMBOLS parity: the python ast tier caps at the same 200 symbols as
+    # the native outline, so the "+N more symbols" hint agrees on huge files.
+    body = "\n\n".join(f"def f{i}():\n    pass" for i in range(repo_map.MAX_SYMBOLS + 30))
+    (tmp_path / "huge.py").write_text(body + "\n", encoding="utf-8")
+    symbols = repo_map.outline_file(tmp_path / "huge.py")
+    assert len(symbols) == repo_map.MAX_SYMBOLS == 200
+    result = repo_map.build_repo_map(tmp_path, max_symbols_per_file=5)
+    assert f"... +{repo_map.MAX_SYMBOLS - 5} more symbols" in result["map"]
+
+
 def test_broken_python_fails_open_per_file(backend: str, tmp_path: Path) -> None:
     (tmp_path / "broken.py").write_text("def f(:\n", encoding="utf-8")
     result = repo_map.build_repo_map(tmp_path)

@@ -21,6 +21,9 @@ from cluxion_agentplugin_supercoder.core.syntax_gate import language_for_path
 DEFAULT_MAX_FILES = 128
 DEFAULT_MAX_SYMBOLS_PER_FILE = 24
 DEFAULT_BUDGET_CHARS = 8_000
+# Per-file outline cap, kept equal to MAX_SYMBOLS in rust/supercoder_index/src/outline.rs
+# so the "+N more symbols" hint agrees across backends on files >200 symbols.
+MAX_SYMBOLS = 200
 OUTLINE_LANGUAGES = {"python", "rust", "javascript", "typescript", "tsx"}
 SIGNATURE_MAX_CHARS = 120
 _OUTLINE_CACHE_MAX = 4096
@@ -189,12 +192,16 @@ def _py_outline(path: Path, language: str) -> dict[str, Any]:
     source_lines = source.splitlines()
     symbols: list[dict[str, Any]] = []
     for node in tree.body:
+        if len(symbols) >= MAX_SYMBOLS:
+            break
         entry = _py_symbol(node, source_lines, depth=0)
         if entry is None:
             continue
         symbols.append(entry)
         if isinstance(node, ast.ClassDef):
             for member in node.body:
+                if len(symbols) >= MAX_SYMBOLS:
+                    break
                 member_entry = _py_symbol(member, source_lines, depth=1)
                 if member_entry is not None:
                     symbols.append(member_entry)
@@ -224,6 +231,7 @@ __all__ = [
     "DEFAULT_BUDGET_CHARS",
     "DEFAULT_MAX_FILES",
     "DEFAULT_MAX_SYMBOLS_PER_FILE",
+    "MAX_SYMBOLS",
     "OUTLINE_LANGUAGES",
     "build_repo_map",
     "clear_outline_cache",
