@@ -198,11 +198,13 @@ def _collect_candidates(root: Path, *, extensions: tuple[str, ...]) -> list[str]
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if any(part in SKIP_DIRS for part in path.parts):
-            continue
         if path.suffix not in extensions:
             continue
-        candidates.append(str(path.relative_to(root)))
+        rel = path.relative_to(root)
+        # skip within-tree only, not root's own ancestry — parity with rust filter_entry (basename pruning)
+        if any(part in SKIP_DIRS for part in rel.parts):
+            continue
+        candidates.append(str(rel))
     candidates.sort()
     return candidates
 

@@ -73,6 +73,16 @@ def test_resolve_backend_honors_env(backend: str) -> None:
     assert rust_bridge.resolve_backend() == backend
 
 
+def test_scan_root_under_skip_named_ancestor(tmp_path: Path, backend: str) -> None:
+    # regression: a repo whose own path sits under a skip-named dir (…/target/repo) must
+    # still index — SKIP_DIRS applies within-tree, not to root's ancestry (rust filter_entry parity)
+    root = tmp_path / "target" / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "b.py").write_text("y = 2\n", encoding="utf-8")
+    assert [e["path"] for e in rust_bridge.scan_repo(root)] == ["b.py", "src/a.py"]
+
+
 def test_backend_parity(repo: Path) -> None:
     if len(BACKENDS) < 2:
         pytest.skip("only one backend available")
