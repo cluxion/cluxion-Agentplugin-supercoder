@@ -195,8 +195,15 @@ def repo_map_deterministic(ctx: DoctorContext) -> tuple[str, str]:
     try:
         from cluxion_agentplugin_supercoder.core.repo_map import build_repo_map
 
-        m1 = build_repo_map(ctx.cwd, budget_chars=2000)
-        m2 = build_repo_map(ctx.cwd, budget_chars=2000)
+        import tempfile
+        # Fixed tiny fixture, not ctx.cwd: from a huge cwd the native scan walks the
+        # whole tree unbounded and hangs. Determinism only needs a stable input.
+        with tempfile.TemporaryDirectory() as _d:
+            _fx = Path(_d)
+            (_fx / "a.py").write_text("def a():\n    return 1\n")
+            (_fx / "b.py").write_text("def b():\n    return 2\n")
+            m1 = build_repo_map(_fx, budget_chars=2000)
+            m2 = build_repo_map(_fx, budget_chars=2000)
 
         def strip(d):
             if isinstance(d, dict):
