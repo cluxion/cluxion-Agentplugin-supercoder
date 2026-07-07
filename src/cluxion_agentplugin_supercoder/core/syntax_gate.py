@@ -84,7 +84,7 @@ def _py_check(content: str, language: str) -> dict[str, Any]:
         try:
             tomllib.loads(content)
         except tomllib.TOMLDecodeError as exc:
-            errors.append(_finding(1, 1, str(exc), content))
+            errors.append(_finding(getattr(exc, 'lineno', None) or 1, getattr(exc, 'colno', None) or 1, str(exc), content))
     return {
         "ok": True,
         "checked": True,

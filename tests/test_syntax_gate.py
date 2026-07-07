@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,12 @@ def test_toml_routes_to_python_everywhere(backend: str) -> None:
     broken = syntax_gate.check_source(content="a = = 1\n", language="toml")
     assert broken["checked"] is True
     assert broken["valid"] is False
+
+
+def test_broken_toml_reports_version_safe_location(backend: str) -> None:
+    result = syntax_gate.check_source(content="ok = 1\nbad = ]\n", language="toml")
+    assert result["valid"] is False
+    assert result["errors"][0]["line"] == (2 if sys.version_info >= (3, 14) else 1)
 
 
 def test_unknown_language_is_fail_open(backend: str) -> None:
