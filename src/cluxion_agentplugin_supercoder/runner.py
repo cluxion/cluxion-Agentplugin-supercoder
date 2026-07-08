@@ -139,14 +139,16 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
     old_text = str(payload.get("old_text", ""))
     try:
         original_text = target.read_text(encoding="utf-8") if target.exists() else None
-        result = apply_patch(
-            target,
-            old_text=old_text,
-            new_text=str(payload.get("new_text", "")),
-            expected_file_hash=_expected_hash_from(payload),
-        )
     except UnicodeDecodeError as exc:
         return ToolResult(False, {"error": f"file is not valid UTF-8: {exc}"})
+    except OSError as exc:
+        return ToolResult(False, {"error": f"path is not a readable file: {exc}"})
+    result = apply_patch(
+        target,
+        old_text=old_text,
+        new_text=str(payload.get("new_text", "")),
+        expected_file_hash=_expected_hash_from(payload),
+    )
     body: dict[str, object] = {
         "file_path": result.file_path,
         "strategy": result.strategy,
@@ -200,12 +202,20 @@ def lint_gate_tool(payload: Mapping[str, object]) -> ToolResult:
         results: list[dict[str, object]] = []
         ok = True
         for item in files:
+            gate = pre_tool_gate("lint_gate", {"path": item}, workspace=root)
+            if gate.decision == "block":
+                ok = False
+                results.append({"path": item, "error": gate.reason})
+                continue
             check = lint_gate.check_file(root / item, cwd=root)
             ok = ok and bool(check.get("ok", False))
             results.append({"path": item, **_without_ok(check)})
         return ToolResult(ok, {"files": results})
     if not rel:
         raise ValueError("path is required")
+    gate = pre_tool_gate("lint_gate", {"path": rel}, workspace=root)
+    if gate.decision == "block":
+        return ToolResult(False, {"error": gate.reason})
     check = lint_gate.check_file(root / rel, cwd=root)
     return ToolResult(bool(check.get("ok", False)), _without_ok(check))
 
@@ -215,19 +225,28 @@ def syntax_gate_tool(payload: Mapping[str, object]) -> ToolResult:
     rel = str(payload.get("path", "")).strip()
     language = str(payload.get("language", "")).strip() or None
     files = _files_changed(payload)
+    root = _workspace(payload)
     if content is None and not rel and files is not None:
-        root = _workspace(payload)
         results: list[dict[str, object]] = []
         ok = True
         for item in files:
+            gate = pre_tool_gate("syntax_gate", {"path": item}, workspace=root)
+            if gate.decision == "block":
+                ok = False
+                results.append({"path": item, "error": gate.reason})
+                continue
             check = syntax_gate.check_source(path=root / item, language=language)
             ok = ok and bool(check.get("ok", False))
             results.append({"path": item, **_without_ok(check)})
         return ToolResult(ok, {"files": results})
     if content is None and not rel:
         raise ValueError("content or path is required")
+    if rel:
+        gate = pre_tool_gate("syntax_gate", {"path": rel}, workspace=root)
+        if gate.decision == "block":
+            return ToolResult(False, {"error": gate.reason})
     check = syntax_gate.check_source(
-        path=(_workspace(payload) / rel) if rel else None,
+        path=(root / rel) if rel else None,
         content=str(content) if content is not None else None,
         language=language,
     )
