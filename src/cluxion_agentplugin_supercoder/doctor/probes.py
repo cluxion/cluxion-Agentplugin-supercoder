@@ -173,7 +173,7 @@ def handler_exception_coverage(ctx: DoctorContext) -> tuple[str, str]:
         if parsed.get("ok") is False and "TypeError" in str(parsed.get("error", "")):
             return "pass", "degraded to error JSON"
         return "fail", f"no error json: {result[:100]}"
-    except Exception as e:
+    except ImportError as e:
         return "skip", f"cannot invoke guard: {e}"
 
 
@@ -219,7 +219,7 @@ def repo_map_deterministic(ctx: DoctorContext) -> tuple[str, str]:
                 return "pass", "deterministic + json roundtrip ok"
             return "warn", "map match but json not"
         return "fail", "non-deterministic"
-    except Exception as e:
+    except ImportError as e:
         return "skip", f"cannot run: {e}"
 
 
@@ -304,7 +304,7 @@ def path_security_secrets_blocked(ctx: DoctorContext) -> tuple[str, str]:
                     if err:
                         return "fail", err
             return "pass", "read_window_tool + patch_tool block .env and credentials"
-    except Exception as e:
+    except ImportError as e:
         return "skip", f"cannot run: {e}"
 
 
@@ -333,7 +333,7 @@ def hermes_context_workspace_root(ctx: DoctorContext) -> tuple[str, str]:
                 if err:
                     return "fail", err
             return "pass", "traversal + sibling-prefix escape blocked"
-    except Exception as e:
+    except ImportError as e:
         return "skip", f"cannot run: {e}"
 
 
@@ -365,7 +365,7 @@ def patch_cursor_validity(ctx: DoctorContext) -> tuple[str, str]:
             if result.payload.get("strategy") != "stale_file":
                 return "fail", f"expected stale_file, got {result.payload.get('strategy')}"
             return "pass", "stale hash blocked"
-    except Exception as e:
+    except ImportError as e:
         return "skip", f"cannot run: {e}"
 
 
@@ -394,7 +394,7 @@ def stale_cursor_protection_enforced(ctx: DoctorContext) -> tuple[str, str]:
             if "stale cursor" not in error:
                 return "fail", f"unexpected error: {error}"
             return "pass", "stale_cursor flag blocked"
-    except Exception as e:
+    except ImportError as e:
         return "skip", f"cannot run: {e}"
 
 
