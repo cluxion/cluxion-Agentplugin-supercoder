@@ -140,13 +140,15 @@ def test_empty_reference_does_not_hang_fuzzy_path() -> None:
     assert elapsed < 1.0
 
 
-def test_exact_patch(tmp_path: Path) -> None:
+def test_unique_exact_match_commits(tmp_path: Path) -> None:
     path = tmp_path / "a.py"
     path.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
     expected = file_hash(path.read_text(encoding="utf-8"))
     result = apply_patch(path, old_text="beta\n", new_text="BETA\n", expected_file_hash=expected)
     assert result.success is True
-    assert "BETA" in path.read_text(encoding="utf-8")
+    assert result.strategy == "exact"
+    assert result.replacements == 1
+    assert path.read_text(encoding="utf-8") == "alpha\nBETA\ngamma\n"
 
 
 def test_stale_patch_blocked(tmp_path: Path) -> None:
@@ -196,12 +198,15 @@ def test_ambiguous_fuzzy_candidates_refuse_to_guess(tmp_path: Path) -> None:
     assert result.strategy == "no_match"
 
 
-def test_exact_match_uses_first_occurrence(tmp_path: Path) -> None:
+def test_ambiguous_exact_match_refuses_to_guess(tmp_path: Path) -> None:
     path = tmp_path / "a.py"
-    path.write_text("x = 1\ny = 2\nx = 1\n", encoding="utf-8")
+    content = "x = 1\ny = 2\nx = 1\n"
+    path.write_text(content, encoding="utf-8")
     result = apply_patch(path, old_text="x = 1\n", new_text="x = 9\n")
-    assert result.success is True
-    assert path.read_text(encoding="utf-8") == "x = 9\ny = 2\nx = 1\n"
+    assert result.success is False
+    assert result.strategy == "ambiguous_exact"
+    assert result.message == "old_text matches 2 locations; add surrounding context to disambiguate"
+    assert path.read_text(encoding="utf-8") == content
 
 
 def test_sha256_prefix_and_bad_hash_rejected(tmp_path: Path) -> None:

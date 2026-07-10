@@ -97,6 +97,13 @@ def apply_patch(
         if expected_file_hash and current_hash != _normalize_hash(expected_file_hash):
             return _failed(str(path), "stale_file", expected_file_hash, "file changed since cursor was created")
         exact = _exact_spans(text, old_text)
+        if len(exact) > 1:
+            return _failed(
+                str(path),
+                "ambiguous_exact",
+                expected_file_hash or current_hash,
+                f"old_text matches {len(exact)} locations; add surrounding context to disambiguate",
+            )
         if exact:
             start, end = exact[0]
             return _commit(
