@@ -58,12 +58,42 @@ def check_source(
     payload: dict[str, object] = {"content": content, "language": resolved}
     try:
         if backend == "native":
-            return rust_bridge._invoke_native("syntax-check", payload)
-        if backend == "subprocess":
-            return rust_bridge._invoke_subprocess("syntax-check", payload)
-    except (RuntimeError, OSError, subprocess.SubprocessError):
+            result = rust_bridge._invoke_native("syntax-check", payload)
+        elif backend == "subprocess":
+            result = rust_bridge._invoke_subprocess("syntax-check", payload)
+        else:
+            return _py_check(content, resolved)
+        if _valid_syntax_backend_result(result, resolved):
+            return result
+    except (RuntimeError, OSError, subprocess.SubprocessError, TypeError, KeyError):
         pass
     return _py_check(content, resolved)
+
+
+def _valid_syntax_backend_result(result: object, language: str) -> bool:
+    """Accept only a well-typed syntax-check dict; otherwise force Python fallback.
+
+    Validation lives solely in check_source — no shared schema framework.
+    """
+    if not isinstance(result, dict):
+        return False
+    if result.get("ok") is not True:
+        return False
+    checked = result.get("checked")
+    valid = result.get("valid")
+    if checked is not True and checked is not False:
+        return False
+    if valid is not True and valid is not False:
+        return False
+    if result.get("language") != language:
+        return False
+    errors = result.get("errors")
+    if not isinstance(errors, list):
+        return False
+    error_count = result.get("error_count")
+    if isinstance(error_count, bool) or not isinstance(error_count, int):
+        return False
+    return error_count == len(errors)
 
 
 def _py_check(content: str, language: str) -> dict[str, Any]:

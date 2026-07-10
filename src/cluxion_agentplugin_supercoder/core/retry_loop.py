@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import tempfile
 import threading
 import time
@@ -105,20 +106,13 @@ def record_failure(workspace: str, path: str, reason: str, *, old_text: str = ""
 def record_success(workspace: str, path: str) -> None:
     """Clear the failure history once a patch lands."""
     _failures.pop((workspace, path), None)
-    try:
-        _state_path(workspace, path).unlink(missing_ok=True)
-    except OSError:
-        pass
+    _disk_delete_basename(_state_basename(workspace, path))
 
 
 def reset() -> None:
     """Drop all tracked state (test isolation)."""
     _failures.clear()
-    try:
-        for entry in _state_dir().glob("*.json"):
-            entry.unlink(missing_ok=True)
-    except OSError:
-        pass
+    _disk_reset()
 
 
 def _memory_append(workspace: str, path: str, signature: str) -> list[str]:
@@ -133,21 +127,188 @@ def _memory_append(workspace: str, path: str, signature: str) -> list[str]:
 
 def _disk_append(workspace: str, path: str, signature: str) -> list[str] | None:
     """Append to the persistent history; None when the state dir is unusable."""
+    basename = _state_basename(workspace, path)
     try:
-        state_dir = _state_dir()
-        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(str(_state_path(workspace, path)), os.O_CREAT | os.O_RDWR, 0o600)
-        with os.fdopen(fd, "r+", encoding="utf-8") as handle, _locked(fd):
+        with _held_state_dirfd() as dir_fd:
+            if dir_fd is None:
+                return None
+            history = _append_via_dirfd(dir_fd, basename, signature)
+            _prune_via_dirfd(dir_fd)
+            return history
+    except OSError:
+        return None
+
+
+def _disk_delete_basename(basename: str) -> None:
+    try:
+        with _held_state_dirfd() as dir_fd:
+            if dir_fd is None:
+                return
+            _unlink_regular_state_file(dir_fd, basename)
+    except OSError:
+        return
+
+
+def _disk_reset() -> None:
+    try:
+        with _held_state_dirfd() as dir_fd:
+            if dir_fd is None:
+                return
+            for name in _list_state_basenames(dir_fd):
+                _unlink_regular_state_file(dir_fd, name)
+    except OSError:
+        return
+
+
+def _dir_open_flags() -> int | None:
+    """Return open flags only when the full race-honest set is available."""
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if not all(hasattr(os, name) for name in required):
+        return None
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _file_open_flags(create: bool) -> int | None:
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_CLOEXEC"):
+        return None
+    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC
+    if create:
+        flags |= os.O_CREAT
+    return flags
+
+
+@contextmanager
+def _held_state_dirfd():
+    """Open the state directory once and hold the dirfd for the operation.
+
+    On unsupported platforms, symlink/non-dir/unsafe owner/mode, yield None so
+    callers use the memory fallback and never chmod/delete/alter the path.
+    """
+    flags = _dir_open_flags()
+    if flags is None:
+        yield None
+        return
+    state_dir = _state_dir()
+    try:
+        # Create only when missing; never chmod an existing unsafe path.
+        if not state_dir.exists():
+            state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError:
+        yield None
+        return
+    try:
+        dir_fd = os.open(str(state_dir), flags)
+    except OSError:
+        yield None
+        return
+    try:
+        if not _dirfd_is_safe(dir_fd):
+            yield None
+            return
+        yield dir_fd
+    finally:
+        os.close(dir_fd)
+
+
+def _dirfd_is_safe(dir_fd: int) -> bool:
+    try:
+        st = os.fstat(dir_fd)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    if st.st_uid != os.geteuid():
+        return False
+    return stat.S_IMODE(st.st_mode) == 0o700
+
+
+def _filefd_is_safe(fd: int) -> bool:
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        return False
+    if not stat.S_ISREG(st.st_mode):
+        return False
+    if st.st_uid != os.geteuid():
+        return False
+    return stat.S_IMODE(st.st_mode) == 0o600
+
+
+def _append_via_dirfd(dir_fd: int, basename: str, signature: str) -> list[str]:
+    flags = _file_open_flags(create=True)
+    if flags is None:
+        raise OSError("O_NOFOLLOW unavailable")
+    fd = os.open(basename, flags, 0o600, dir_fd=dir_fd)
+    try:
+        if not _filefd_is_safe(fd):
+            raise OSError("unsafe retry state file")
+        with os.fdopen(fd, "r+", encoding="utf-8", closefd=False) as handle, _locked(fd):
             history = _decode(handle.read())
             history.append(signature)
             handle.seek(0)
             handle.truncate()
             json.dump({"updated": time.time(), "history": history}, handle)
             handle.flush()
-        _prune(state_dir)
         return history
+    finally:
+        os.close(fd)
+
+
+def _unlink_regular_state_file(dir_fd: int, basename: str) -> None:
+    if not basename.endswith(".json") or "/" in basename or basename in {".", ".."}:
+        return
+    flags = _file_open_flags(create=False)
+    if flags is None:
+        return
+    try:
+        fd = os.open(basename, flags, dir_fd=dir_fd)
+    except FileNotFoundError:
+        return
     except OSError:
-        return None
+        return
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            return
+        if opened.st_uid != os.geteuid() or stat.S_IMODE(opened.st_mode) != 0o600:
+            return
+        current = os.stat(basename, dir_fd=dir_fd, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+            return
+        os.unlink(basename, dir_fd=dir_fd)
+    except (FileNotFoundError, OSError):
+        return
+    finally:
+        os.close(fd)
+
+
+def _list_state_basenames(dir_fd: int) -> list[str]:
+    # Enumerate via the held dirfd so a path-string race cannot redirect us.
+    try:
+        return [name for name in os.listdir(dir_fd) if name.endswith(".json")]
+    except OSError:
+        return []
+
+
+def _prune_via_dirfd(dir_fd: int) -> None:
+    # ponytail: full-dir mtime sort on every failure; fine at the 256-file cap.
+    try:
+        dated: list[tuple[float, str]] = []
+        for name in _list_state_basenames(dir_fd):
+            try:
+                st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != 0o600:
+                continue
+            dated.append((st.st_mtime, name))
+        dated.sort()
+        for _, name in dated[:-MAX_TRACKED_FILES]:
+            _unlink_regular_state_file(dir_fd, name)
+    except OSError:
+        return
 
 
 def _decode(raw: str) -> list[str]:
@@ -160,24 +321,19 @@ def _decode(raw: str) -> list[str]:
         return []
 
 
-def _prune(state_dir: Path) -> None:
-    # ponytail: full-dir mtime sort on every failure; fine at the 256-file cap.
-    try:
-        entries = sorted(state_dir.glob("*.json"), key=lambda entry: entry.stat().st_mtime)
-        for stale in entries[:-MAX_TRACKED_FILES]:
-            stale.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-
 def _state_dir() -> Path:
     override = os.environ.get("CLUXION_SUPERCODER_RETRY_DIR", "").strip()
     return Path(override) if override else Path(tempfile.gettempdir()) / "cluxion-supercoder-retry"
 
 
-def _state_path(workspace: str, path: str) -> Path:
+def _state_basename(workspace: str, path: str) -> str:
     digest = hashlib.sha256(f"{workspace}\0{path}".encode()).hexdigest()[:32]
-    return _state_dir() / f"{digest}.json"
+    return f"{digest}.json"
+
+
+def _state_path(workspace: str, path: str) -> Path:
+    """Path form kept for tests that inspect the on-disk state file location."""
+    return _state_dir() / _state_basename(workspace, path)
 
 
 @contextmanager

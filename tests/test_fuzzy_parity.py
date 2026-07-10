@@ -101,12 +101,12 @@ _WORDS = [
     "λόγος",
     "🚀",
     "🧪",
-    "𝒳𝒴",
+    "𝒳𝒴",  # noqa: RUF001 - intentional astral Unicode corpus
     "世界",
     "你好",
     "привет",
 ]
-_BREAKS = ["\n"] * 12 + ["\r\n"] * 3 + ["\r", " ", "\x0b", "\x0c", "\x85"]
+_BREAKS = ["\n"] * 12 + ["\r\n"] * 3 + ["\r", " ", "\x0b", "\x0c", "\x85"]  # noqa: RUF001
 
 
 def _rand_line(rng: random.Random, long: bool = False) -> str:
@@ -155,7 +155,7 @@ def _generate_case(rng: random.Random, index: int) -> tuple[str, str, str]:
     if scenario == "dup":
         copy = _mutate(rng, block, rng.randint(0, 2))
         insert_at = rng.choice([0, len(lines)])
-        lines = ([copy] + lines) if insert_at == 0 else (lines + [copy])
+        lines = [copy, *lines] if insert_at == 0 else [*lines, copy]
     return scenario, "".join(lines), reference
 
 
@@ -168,7 +168,7 @@ def _handcrafted_cases() -> list[tuple[str, str, str]]:
         ("empty-text", "", "ref\n"),
         ("no-trailing-newline", "alpha\nbeta\ngamma", "beta"),
         ("crlf-file", "alpha\r\nbeta\r\ngamma\r\n", "beta\n"),
-        ("exotic-breaks", "a b\x0bc\x0cd\x85e\rf\r\ng\n", "b\x0bc\n"),
+        ("exotic-breaks", "a b\x0bc\x0cd\x85e\rf\r\ng\n", "b\x0bc\n"),  # noqa: RUF001
         ("astral-offsets", "🚀🚀🚀\ndef f():\n    return 1\n🧪🧪\n", "def f():\n    return 2\n"),
         ("near-tie-better-first", filler + near_better + filler + near_worse, near_old),
         ("near-tie-better-last", filler + near_worse + filler + near_better, near_old),
@@ -227,3 +227,58 @@ def test_fuzzy_span_python_fallback_when_backend_off(tmp_path: Path, monkeypatch
     result = apply_patch(path, old_text=drifted, new_text="def handler(request):\n    return compute(request)\n")
     assert result.success is True
     assert result.strategy == "fuzzy"
+
+
+def _force_fuzzy_backend(monkeypatch, payload: dict[str, object]):
+    monkeypatch.setattr(rust_bridge, "resolve_backend", lambda: "native")
+    monkeypatch.setattr(rust_bridge, "_invoke_native", lambda _cmd, _payload: payload)
+    rust_bridge._fallback_warned = False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"ok": True},  # missing matched
+        {"ok": True, "matched": "yes"},
+        {"ok": True, "matched": True},  # missing span fields
+        {"ok": True, "matched": True, "start": True, "end": 2, "score": 0.9, "ambiguous": False},
+        {"ok": True, "matched": True, "start": "0", "end": 2, "score": 0.9, "ambiguous": False},
+        {"ok": True, "matched": True, "start": 0, "end": 2, "score": float("nan"), "ambiguous": False},
+        {"ok": True, "matched": True, "start": 0, "end": 2, "score": float("inf"), "ambiguous": False},
+        {"ok": True, "matched": True, "start": 0, "end": 2, "score": 10**400, "ambiguous": False},
+        {"ok": True, "matched": True, "start": 0, "end": 2, "score": 1.5, "ambiguous": False},
+        {"ok": True, "matched": True, "start": -1, "end": 2, "score": 0.9, "ambiguous": False},
+        {"ok": True, "matched": True, "start": 1, "end": 1, "score": 0.9, "ambiguous": False},
+        {"ok": True, "matched": True, "start": 0, "end": 99, "score": 0.9, "ambiguous": False},
+        {"ok": True, "matched": True, "start": 0, "end": 2, "score": 0.9, "ambiguous": 1},
+    ],
+)
+def test_fuzzy_span_malformed_backend_falls_back(monkeypatch, payload: dict[str, object], capsys) -> None:
+    text = "ab\ncd\n"
+    _force_fuzzy_backend(monkeypatch, payload)
+    assert rust_bridge.fuzzy_span_result(text, "ab\n") is None
+    err = capsys.readouterr().err
+    assert "malformed fuzzy_span backend result" in err or "falling back" in err
+
+
+def test_fuzzy_span_matched_false_is_valid_no_match(monkeypatch) -> None:
+    _force_fuzzy_backend(monkeypatch, {"ok": True, "matched": False})
+    result = rust_bridge.fuzzy_span_result("alpha\n", "nope\n")
+    assert result is not None
+    assert result["matched"] is False
+    assert "start" not in result
+
+
+def test_fuzzy_span_malformed_still_applies_correct_file_content(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "a.py"
+    body = "def handler(request):\n    value = compute(request)\n    return value\n"
+    path.write_text(body, encoding="utf-8")
+    drifted = "def handler(request):\n    value = compute(request)  # cached\n    return value\n"
+    _force_fuzzy_backend(
+        monkeypatch,
+        {"ok": True, "matched": True, "start": 0, "end": 9999, "score": 0.99, "ambiguous": False},
+    )
+    result = apply_patch(path, old_text=drifted, new_text="def handler(request):\n    return compute(request)\n")
+    assert result.success is True
+    assert result.strategy == "fuzzy"
+    assert path.read_text(encoding="utf-8") == "def handler(request):\n    return compute(request)\n"

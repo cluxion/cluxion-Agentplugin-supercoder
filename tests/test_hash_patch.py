@@ -178,6 +178,45 @@ def test_missing_file_fails_closed(tmp_path: Path) -> None:
     assert result.strategy == "missing_file"
 
 
+def test_final_component_symlink_blocks_patch_without_touching_target(tmp_path: Path) -> None:
+    target = tmp_path / "real.py"
+    target.write_text("alpha\nbeta\n", encoding="utf-8")
+    link = tmp_path / "via_link.py"
+    link.symlink_to(target)
+    result = apply_patch(link, old_text="beta\n", new_text="BETA\n")
+    assert result.success is False
+    assert result.strategy == "symlink_patch_blocked"
+    assert "real path hint" in result.message
+    assert "real.py" in result.message or str(target) in result.message
+    assert link.is_symlink()
+    assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
+    assert os.readlink(link) == str(target) or Path(os.readlink(link)).name == "real.py"
+
+
+def test_symlink_swap_before_commit_is_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "a.py"
+    path.write_text("alpha\nbeta\n", encoding="utf-8")
+    victim = tmp_path / "victim.py"
+    victim.write_text("KEEP\n", encoding="utf-8")
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    original_commit = hp._commit
+
+    def swap_then_commit(*args, **kwargs):
+        path.unlink()
+        path.symlink_to(victim)
+        return original_commit(*args, **kwargs)
+
+    monkeypatch.setattr(hp, "_commit", swap_then_commit)
+    result = apply_patch(path, old_text="beta\n", new_text="BETA\n")
+    # Either the patched _commit rejects after swap, or we observe unchanged victim.
+    # With recheck inside _commit, strategy is symlink_patch_blocked.
+    assert result.success is False
+    assert result.strategy == "symlink_patch_blocked"
+    assert victim.read_text(encoding="utf-8") == "KEEP\n"
+    assert path.is_symlink()
+
+
 def test_fuzzy_patch_tolerates_minor_drift(tmp_path: Path) -> None:
     path = tmp_path / "a.py"
     body = "def handler(request):\n    value = compute(request)\n    return value\n"

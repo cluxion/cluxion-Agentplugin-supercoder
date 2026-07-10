@@ -9,6 +9,7 @@ Backend resolution order (override with CLUXION_SUPERCODER_BACKEND):
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -117,6 +118,10 @@ def fuzzy_span_result(text: str, reference: str) -> dict[str, object] | None:
     Parity with core.hash_patch._best_fuzzy_span is proven per-release by
     tests/test_fuzzy_parity.py; any backend failure (including an older
     binary without the fuzzy_span op) falls back silently-but-warned.
+
+    This function is the sole validation owner for fuzzy_span backend dicts:
+    malformed/missing/wrong-range results never coerce — they warn once and
+    return None so the Python fuzzy tier runs.
     """
     backend = resolve_backend()
     if backend == "python":
@@ -129,10 +134,53 @@ def fuzzy_span_result(text: str, reference: str) -> dict[str, object] | None:
     except Exception as exc:
         _warn_fallback(backend, exc)
         return None
-    if not result.get("ok", False):
+    validated = _validate_fuzzy_span_result(result, text)
+    if validated is None:
+        _warn_fallback(backend, RuntimeError("malformed fuzzy_span backend result"))
         return None
-    result["backend"] = backend
-    return result
+    validated["backend"] = backend
+    return validated
+
+
+def _validate_fuzzy_span_result(result: object, text: str) -> dict[str, object] | None:
+    """Strict schema for fuzzy_span backend payloads (no clamp/coerce)."""
+    if not isinstance(result, dict):
+        return None
+    if result.get("ok") is not True:
+        return None
+    matched = result.get("matched")
+    if matched is not True and matched is not False:
+        return None
+    if matched is False:
+        return {"ok": True, "matched": False}
+    start = result.get("start")
+    end = result.get("end")
+    if isinstance(start, bool) or not isinstance(start, int):
+        return None
+    if isinstance(end, bool) or not isinstance(end, int):
+        return None
+    ambiguous = result.get("ambiguous")
+    if ambiguous is not True and ambiguous is not False:
+        return None
+    score = result.get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None
+    try:
+        numeric_score = float(score)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(numeric_score) or not (0.0 <= numeric_score <= 1.0):
+        return None
+    if not (0 <= start < end <= len(text)):
+        return None
+    return {
+        "ok": True,
+        "matched": True,
+        "start": start,
+        "end": end,
+        "score": numeric_score,
+        "ambiguous": ambiguous,
+    }
 
 
 def _warn_fallback(backend: str, exc: Exception) -> None:
@@ -196,6 +244,9 @@ def _parse_backend_json(raw: str, command: str) -> dict[str, object]:
 def _collect_candidates(root: Path, *, extensions: tuple[str, ...]) -> list[str]:
     candidates: list[str] = []
     for path in root.rglob("*"):
+        # Match Rust WalkDir: never follow file symlinks (is_file() would).
+        if path.is_symlink():
+            continue
         if not path.is_file():
             continue
         if path.suffix not in extensions:

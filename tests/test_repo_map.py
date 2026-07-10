@@ -255,3 +255,26 @@ def test_identical_rewrite_keeps_outline_cache(
     result = repo_map.build_repo_map(sample_repo)
     assert calls["count"] == 0
     assert "map" in result
+
+
+def test_python_scan_excludes_file_symlinks_and_external_symbol_leak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "python")
+    outside = tmp_path / "outside_pkg"
+    outside.mkdir()
+    external = outside / "leaked.py"
+    external.write_text("def external_secret_symbol():\n    return 1\n", encoding="utf-8")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "app.py").write_text("def local_ok():\n    return 0\n", encoding="utf-8")
+    link = workspace / "leaked.py"
+    link.symlink_to(external)
+    entries = rust_bridge.scan_repo(workspace)
+    paths = [entry["path"] for entry in entries]
+    assert paths == ["app.py"]
+    assert "leaked.py" not in paths
+    result = repo_map.build_repo_map(workspace)
+    assert result["ok"] is True
+    assert "external_secret_symbol" not in result["map"]
+    assert "local_ok" in result["map"]

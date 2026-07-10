@@ -226,3 +226,40 @@ def test_syntax_gate_tool_accepts_files_changed(tmp_path: Path, backend: str) ->
     assert result.ok is True
     assert [item["path"] for item in result.payload["files"]] == ["ok.py", "broken.json"]
     assert [item["valid"] for item in result.payload["files"]] == [True, False]
+
+
+def test_malformed_native_syntax_schema_falls_back_without_keyerror(monkeypatch) -> None:
+    monkeypatch.setattr(rust_bridge, "resolve_backend", lambda: "native")
+
+    def malformed(_command: str, _payload: dict[str, object]) -> dict[str, object]:
+        return {"ok": True}  # missing checked/valid/errors/error_count/language
+
+    monkeypatch.setattr(rust_bridge, "_invoke_native", malformed)
+    result = syntax_gate.check_source(content="def add(a, b:\n    return a + b\n", language="python")
+    assert result["checked"] is True
+    assert result["valid"] is False
+    assert isinstance(result["errors"], list)
+    assert result["error_count"] == len(result["errors"])
+
+
+def test_malformed_native_schema_still_reverts_invalid_patch(tmp_path: Path, monkeypatch) -> None:
+    original = "def add(a, b):\n    return a + b\n"
+    digest = _write(tmp_path / "mod.py", original)
+    monkeypatch.setattr(rust_bridge, "resolve_backend", lambda: "native")
+
+    def malformed(_command: str, _payload: dict[str, object]) -> dict[str, object]:
+        return {"ok": True}
+
+    monkeypatch.setattr(rust_bridge, "_invoke_native", malformed)
+    result = runner.patch_tool(
+        {
+            "cwd": str(tmp_path),
+            "path": "mod.py",
+            "old_text": "    return a + b\n",
+            "new_text": "    return a +\n",
+            "expected_file_hash": digest,
+        }
+    )
+    assert result.ok is False
+    assert result.payload["strategy"] == "syntax_reverted"
+    assert (tmp_path / "mod.py").read_text(encoding="utf-8") == original

@@ -153,10 +153,20 @@ Apache-2.0
 
 ## Native backend (optional, faster)
 
-The Rust backend is not built automatically. After install, run once:
+A plain `pip install` / source tree does **not** ship the native extension. Build the
+repo's merged platform wheel (Python package + native module in one artifact), then
+install that **same** wheel into the uv tool environment and the Hermes host:
 
 ```bash
-uv pip install ./rust/supercoder_index --python .venv/bin/python
+bash scripts/build_local_wheel.sh
+WHEEL="$(python3 -c 'from pathlib import Path; w=list(Path("dist-merged").glob("cluxion_agentplugin_supercoder-*.whl")); assert len(w)==1, f"expected one fresh merged wheel, found {len(w)}"; print(w[0].resolve())')"
+uv tool install --force "$WHEEL"
+HERMES_PY="$HOME/.hermes/hermes-agent/venv/bin/python"
+uv pip install --python "$HERMES_PY" --no-deps --reinstall "$WHEEL"
+uv pip check --python "$HERMES_PY"
 ```
 
-Without it the plugin falls back to a slower pure-Python path (`doctor` reports `native_module_importable`).
+Do not install `./rust/supercoder_index` as a separate distribution for production hosts —
+the supported local artifact is the merged wheel from `scripts/build_local_wheel.sh`.
+Without native code the plugin falls back to a slower pure-Python path
+(`doctor` reports `native_module_importable`).

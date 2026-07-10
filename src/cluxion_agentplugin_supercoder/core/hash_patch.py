@@ -6,7 +6,7 @@ import hashlib
 import os
 import tempfile
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -90,9 +90,16 @@ def apply_patch(
         return _failed(str(path), "empty_old_text", expected_file_hash, "old_text must be non-empty")
     old_text = _normalize_newlines(old_text)
     new_text = _normalize_newlines(new_text)
-    if not path.exists():
+    if not path.exists() and not path.is_symlink():
         return _failed(str(path), "missing_file", expected_file_hash, "file not found")
     with _exclusive_lock(path):
+        # Final-component symlink: refuse mutation (reads may follow; writes must not).
+        # Recheck under the lock so a file→symlink swap before apply still fails closed.
+        blocked = _symlink_patch_block(path, expected_file_hash)
+        if blocked is not None:
+            return blocked
+        if not path.exists():
+            return _failed(str(path), "missing_file", expected_file_hash, "file not found")
         with path.open(encoding="utf-8", newline="") as source:
             raw = source.read()
         eol = "\r\n" if "\r\n" in raw else "\n"
@@ -139,6 +146,22 @@ def apply_patch(
                 pre_image_raw=raw,
             )
         return _failed(str(path), "no_match", expected_file_hash or current_hash, "patch target not found")
+
+
+def _symlink_patch_block(path: Path, expected_file_hash: str) -> PatchResult | None:
+    """Reject patching when the final path component is a symlink."""
+    if not path.is_symlink():
+        return None
+    try:
+        real_hint = os.readlink(path)
+    except OSError:
+        real_hint = str(path)
+    return _failed(
+        str(path),
+        "symlink_patch_blocked",
+        expected_file_hash,
+        f"refusing to patch symlink; real path hint: {real_hint}",
+    )
 
 
 def _normalize_newlines(content: str) -> str:
@@ -200,11 +223,12 @@ def _fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, bool] 
     if reference:
         native = rust_bridge.fuzzy_span_result(text, reference)
         if native is not None:
-            if not native.get("matched", False):
+            # fuzzy_span_result already validated types/ranges; no coerce here.
+            if native.get("matched") is not True:
                 return None
-            start = int(native["start"])
-            end = int(native["end"])
-            return start, end, text[start:end], float(native["score"]), bool(native["ambiguous"])
+            start = native["start"]
+            end = native["end"]
+            return int(start), int(end), text[int(start) : int(end)], float(native["score"]), native["ambiguous"] is True
     return _best_fuzzy_span(text, reference)
 
 
@@ -251,10 +275,8 @@ def _atomic_write(path: Path, content: str) -> None:
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp_path = Path(tmp.name)
-    try:
+    with suppress(OSError):
         os.chmod(tmp_path, os.stat(path).st_mode & 0o777)
-    except OSError:
-        pass
     os.replace(tmp_path, path)
 
 
@@ -285,6 +307,11 @@ def _commit(
     eol: str = "\n",
     pre_image_raw: str,
 ) -> PatchResult:
+    # Re-check under the held exclusive lock: a TOCTOU swap to a symlink must
+    # not let _atomic_write follow the link and clobber an external target.
+    blocked = _symlink_patch_block(path, expected)
+    if blocked is not None:
+        return blocked
     updated = f"{text[:start]}{new_content}{text[end:]}"
     if eol != "\n":
         updated = updated.replace("\n", eol)

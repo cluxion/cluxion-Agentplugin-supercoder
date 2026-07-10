@@ -115,9 +115,13 @@
       "native package not installed"
     ],
     "fix_steps": [
-      "Build+install the native backend: cd <plugin-root> && uv pip install ./rust/supercoder_index --python .venv/bin/python (or pip install ./rust/supercoder_index)",
+      "From the plugin repo, build the merged platform wheel: bash scripts/build_local_wheel.sh",
+      "Resolve exactly one fresh dist-merged wheel to an absolute WHEEL path; never pass a glob to an install command",
+      "Install the exact artifact into the uv tool: uv tool install --force \"$WHEEL\"",
+      "Install that same artifact into Hermes: uv pip install --python \"$HOME/.hermes/hermes-agent/venv/bin/python\" --no-deps --reinstall \"$WHEEL\"",
+      "Verify Hermes dependencies: uv pip check --python \"$HOME/.hermes/hermes-agent/venv/bin/python\"",
       "Run: python -c 'import supercoder_index_native'",
-      "If ImportError, reinstall the bundled wheel; fallback keeps working meanwhile"
+      "If ImportError, reinstall that same merged wheel; fallback keeps working meanwhile"
     ],
     "change_robust": "Attempts the import + hasattr at runtime; WARN (not fail) because fallback works",
     "detection_method": "import supercoder_index_native succeeds"
@@ -480,20 +484,19 @@
     "check_id": "path_security_secrets_blocked",
     "category": "runtime",
     "severity": "critical",
-    "what_it_checks": "Whether safety._path_gate() blocks access to files matching secret patterns (.env, id_rsa, credentials, secrets).",
-    "failure_symptom": "Patches apply to .env, credentials, secrets files. Sensitive data is modified. Secret keys are exposed in patch attempts.",
+    "what_it_checks": "Whether safety._path_gate() blocks workspace-relative secret path components (casefolded exact token or token+'.' prefix: .env, .env.local, id_rsa, CREDENTIALS.json, secrets).",
+    "failure_symptom": "Patches apply to .env/.env.local, credentials, secrets files. Sensitive data is modified. Secret keys are exposed in patch attempts.",
     "likely_causes": [
-      "safety._path_gate() not checking against _SECRET_PARTS tuple",
-      "Path matching uses basename only (allows .env in subdir that should be blocked)"
+      "safety._path_gate() not checking workspace-relative parts against _SECRET_PARTS",
+      "Matching uses full absolute path (false positive on Secret_Project ancestors) or substring without '.' boundary"
     ],
     "fix_steps": [
-      "Check safety.py line ~23: _SECRET_PARTS = ('.env', 'id_rsa', 'credentials', 'secrets')",
-      "Verify line ~56: if any(part in resolved.parts for part in _SECRET_PARTS) — this blocks any path component matching",
-      "Test: try patch_tool on .env, id_rsa, credentials.json, secrets.yaml — all should return blocked",
-      "Test subdirs: .config/.env, subdir/credentials.json — all should be blocked",
-      "If false positives (e.g., secretsmanager.py blocked), refine secret pattern matching"
+      "Check safety.py: _SECRET_PARTS = ('.env', 'id_rsa', 'credentials', 'secrets')",
+      "Verify gate uses workspace-relative casefolded parts with part==token or part.startswith(token+'.')",
+      "Test blocked: .env, .env.local, CREDENTIALS.json, SECRETS.yaml, id_rsa.pub, config/credentials/db.json",
+      "Test allowed: secretsmanager.py, credentials-guide.md, paths under a Secret_Project ancestor workspace"
     ],
-    "change_robust": "Test with files matching secret patterns in various locations. Verify in resolved.parts (all path components) not just basename.",
+    "change_robust": "Test secret patterns in various locations; only workspace-relative components count; lookalikes must remain allowed.",
     "detection_method": "Try to read/patch a .env file and verify it's blocked: python -c \"from cluxion_agentplugin_supercoder import runner; from pathlib import Path; (Path('/tmp/.env').write_text('KEY=secret')); r = runner.read_window_tool({'cwd': '/tmp', 'path': '.env'}); print('Blocked:', not r.ok, 'Reason:', r.payload.get('error'))\"."
   }
 ]

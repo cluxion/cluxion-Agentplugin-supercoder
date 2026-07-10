@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+import subprocess
 from pathlib import Path
 
 from cluxion_agentplugin_supercoder.core.test_gate import suggest_test_commands
@@ -164,3 +166,50 @@ def test_suggest_test_commands_excludes_workspace_escape_path(tmp_path: Path) ->
     payload = suggest_test_commands([escape], cwd=workspace)
     assert escape not in payload["targets"]
     assert escape not in str(payload["command"])
+
+
+def test_generated_pytest_commands_quote_shell_metacharacters(tmp_path: Path) -> None:
+    # A generated target with shell metacharacters must not become shell syntax.
+    evil_name = "test_safe;touch PWNED.py"
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / evil_name).write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    rel = f"tests/{evil_name}"
+    payload = suggest_test_commands([rel], cwd=tmp_path)
+    assert payload["targets"] == [rel]
+    assert shlex.split(str(payload["command"])) == ["pytest", "-q", rel]
+    for alt in payload["alternatives"]:
+        if alt.startswith("pytest") or "pytest" in alt:
+            argv = shlex.split(str(alt))
+            assert rel in argv
+            assert ";touch" not in " ".join(argv[:-1]) if argv else True
+    # Proof: executing the suggested command via a shell cannot create PWNED.py.
+    subprocess.run(
+        ["bash", "-c", str(payload["command"])],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert not (tmp_path / "PWNED.py").exists()
+    for alt in payload["alternatives"]:
+        if "pytest" not in str(alt):
+            continue
+        subprocess.run(
+            ["bash", "-c", str(alt)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert not (tmp_path / "PWNED.py").exists(), alt
+
+
+def test_explicit_and_project_runner_commands_are_not_reshlexed(tmp_path: Path) -> None:
+    (tmp_path / "Cargo.toml").write_text('[package]\nname = "demo"\n', encoding="utf-8")
+    explicit = "pytest -q tests/test_safe;touch PWNED.py"
+    payload = suggest_test_commands([], command=explicit, cwd=tmp_path)
+    assert payload["command"] == explicit
+    assert payload["source"] == "explicit_command"
+    rust = suggest_test_commands(["src/lib.rs"], cwd=tmp_path)
+    assert rust["command"] == "cargo test -q"

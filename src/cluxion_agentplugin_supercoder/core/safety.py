@@ -48,14 +48,34 @@ def pre_tool_gate(
 
 def _path_gate(workspace: Path, rel_or_abs: str) -> SafetyDecision:
     candidate = Path(rel_or_abs)
+    workspace_resolved = workspace.resolve()
     resolved = (workspace / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
     # String-prefix comparison would let sibling dirs through (/work vs /work2),
     # so containment is checked path-component-wise.
-    if not resolved.is_relative_to(workspace.resolve()):
+    if not resolved.is_relative_to(workspace_resolved):
         return SafetyDecision("block", "workspace escape blocked")
-    if any(part in _SECRET_PARTS for part in resolved.parts):
+    # Only workspace-relative components count — ancestor dirs like Secret_Project
+    # must never trip the secret gate.
+    relative = resolved.relative_to(workspace_resolved)
+    if _is_secret_relative(relative):
         return SafetyDecision("block", "secret file access blocked")
     return SafetyDecision("allow", "path ok")
+
+
+def _is_secret_relative(relative: Path) -> bool:
+    """Block exact sensitive basenames and dotted extensions (casefolded).
+
+    ``part == token`` or ``part.startswith(token + ".")`` after casefolding:
+    blocks ``.env``, ``.env.local``, ``CREDENTIALS.json``, ``id_rsa.pub`` while
+    allowing ``secretsmanager.py`` and ``credentials-guide.md``.
+    """
+    for part in relative.parts:
+        folded = part.casefold()
+        for token in _SECRET_PARTS:
+            token_folded = token.casefold()
+            if folded == token_folded or folded.startswith(token_folded + "."):
+                return True
+    return False
 
 
 __all__ = ["SafetyDecision", "pre_tool_gate"]

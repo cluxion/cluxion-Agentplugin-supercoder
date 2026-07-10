@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -130,6 +131,83 @@ def test_patch_failure_carries_retry_advice(tmp_path: Path) -> None:
     assert repeat.payload["retry"]["repeated_input"] is True
     third = runner.patch_tool(payload)
     assert third.payload["retry"]["escalate"] is True
+
+
+def test_retry_dir_symlink_falls_back_without_touching_victim(monkeypatch, tmp_path: Path) -> None:
+    victim = tmp_path / "victim_dir"
+    victim.mkdir(mode=0o700)
+    marker = victim / "keep.txt"
+    marker.write_text("safe\n", encoding="utf-8")
+    link = tmp_path / "retry_link"
+    link.symlink_to(victim)
+    monkeypatch.setenv("CLUXION_SUPERCODER_RETRY_DIR", str(link))
+    attempts = [retry_loop.record_failure("/ws", "a.py", "no_match", old_text="x") for _ in range(3)]
+    assert [advice.attempt for advice in attempts] == [1, 2, 3]
+    assert retry_loop._failures
+    assert marker.read_text(encoding="utf-8") == "safe\n"
+    assert list(victim.glob("*.json")) == []
+    retry_loop.record_success("/ws", "a.py")
+    retry_loop.reset()
+    assert marker.read_text(encoding="utf-8") == "safe\n"
+    assert list(victim.glob("*")) == [marker]
+
+
+def test_retry_state_file_symlink_does_not_clobber_victim(monkeypatch, tmp_path: Path) -> None:
+    state_dir = tmp_path / "retry_state"
+    state_dir.mkdir(mode=0o700)
+    monkeypatch.setenv("CLUXION_SUPERCODER_RETRY_DIR", str(state_dir))
+    victim = tmp_path / "victim.json"
+    victim.write_text("DO_NOT_CLOBBER\n", encoding="utf-8")
+    state_path = retry_loop._state_path("/ws", "a.py")
+    # Plant a symlink where the state file would live.
+    if state_path.exists() or state_path.is_symlink():
+        state_path.unlink()
+    state_path.symlink_to(victim)
+    advice = retry_loop.record_failure("/ws", "a.py", "no_match", old_text="x")
+    # Unsafe file → memory fallback; victim must be untouched.
+    assert advice.attempt == 1
+    assert victim.read_text(encoding="utf-8") == "DO_NOT_CLOBBER\n"
+    assert state_path.is_symlink()
+    retry_loop.record_success("/ws", "a.py")
+    assert victim.read_text(encoding="utf-8") == "DO_NOT_CLOBBER\n"
+    assert state_path.is_symlink()
+
+
+def test_retry_state_delete_opens_basename_nofollow_before_unlink(monkeypatch, tmp_path: Path) -> None:
+    state_dir = tmp_path / "retry_state"
+    state_dir.mkdir(mode=0o700)
+    monkeypatch.setenv("CLUXION_SUPERCODER_RETRY_DIR", str(state_dir))
+    retry_loop.record_failure("/ws", "a.py", "no_match", old_text="x")
+    state_path = retry_loop._state_path("/ws", "a.py")
+    assert state_path.exists()
+
+    real_open = retry_loop.os.open
+    opened_basename = False
+
+    def spy_open(path, flags, *args, **kwargs):
+        nonlocal opened_basename
+        if path == state_path.name and kwargs.get("dir_fd") is not None:
+            opened_basename = True
+            assert flags & retry_loop.os.O_NOFOLLOW
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(retry_loop.os, "open", spy_open)
+    retry_loop.record_success("/ws", "a.py")
+
+    assert opened_basename is True
+    assert not state_path.exists()
+
+
+def test_retry_dir_wrong_mode_falls_back_without_chmod(monkeypatch, tmp_path: Path) -> None:
+    state_dir = tmp_path / "open_retry"
+    state_dir.mkdir(mode=0o755)
+    monkeypatch.setenv("CLUXION_SUPERCODER_RETRY_DIR", str(state_dir))
+    mode_before = stat.S_IMODE(state_dir.stat().st_mode)
+    advice = retry_loop.record_failure("/ws", "a.py", "no_match", old_text="x")
+    assert advice.attempt == 1
+    assert retry_loop._failures
+    assert stat.S_IMODE(state_dir.stat().st_mode) == mode_before
+    assert list(state_dir.glob("*.json")) == []
 
 
 def test_syntax_revert_counts_as_attempt_and_success_clears(tmp_path: Path) -> None:

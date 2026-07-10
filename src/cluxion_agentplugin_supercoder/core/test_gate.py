@@ -7,6 +7,7 @@ exists. Suggest-only: the host terminal runs the command."""
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 from cluxion_agentplugin_supercoder import rust_bridge
@@ -177,7 +178,7 @@ def suggest_test_commands(
         primary = explicit
         source = "explicit_command"
     elif targets:
-        primary = "pytest -q " + " ".join(targets)
+        primary = _pytest_cmd(targets)
         source = "mapped_from_files_changed"
     elif runners and ".py" not in suffixes:
         primary = runners[0]["command"]
@@ -203,12 +204,19 @@ def suggest_test_commands(
     }
 
 
+def _pytest_cmd(targets: list[str] | None = None, *, module: bool = False) -> str:
+    """Shell-safe pytest suggestion for generated primary/alternative commands only."""
+    argv = ["python", "-m", "pytest", "-q"] if module else ["pytest", "-q"]
+    if targets:
+        argv.extend(targets)
+    return shlex.join(argv)
+
+
 def _alternatives(targets: list[str], runners: list[dict[str, str]], primary: str) -> list[str]:
     if targets:
-        joined = " ".join(targets)
-        options = [f"pytest -q {joined}", f"python -m pytest -q {joined}"]
+        options = [_pytest_cmd(targets), _pytest_cmd(targets, module=True)]
     else:
-        options = ["pytest -q", "python -m pytest -q"]
+        options = [_pytest_cmd(), _pytest_cmd(module=True)]
     options.extend(runner["command"] for runner in runners)
     return [option for option in dict.fromkeys(options) if option != primary]
 

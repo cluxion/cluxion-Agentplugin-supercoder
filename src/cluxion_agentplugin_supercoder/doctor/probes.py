@@ -281,14 +281,27 @@ def _assert_tool_blocks(
 def path_security_secrets_blocked(ctx: DoctorContext) -> tuple[str, str]:
     try:
         from cluxion_agentplugin_supercoder import runner
+        from cluxion_agentplugin_supercoder.core.safety import pre_tool_gate
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / ".env").write_text("KEY=secret", encoding="utf-8")
+            (root / ".env.local").write_text("KEY=secret", encoding="utf-8")
+            (root / "CREDENTIALS.json").write_text("{}", encoding="utf-8")
+            (root / "SECRETS.yaml").write_text("k: v\n", encoding="utf-8")
+            (root / "id_rsa.pub").write_text("ssh-rsa A\n", encoding="utf-8")
             cred = root / "config" / "credentials"
             cred.mkdir(parents=True)
             (cred / "db.json").write_text("{}", encoding="utf-8")
-            for rel in (".env", "config/credentials/db.json"):
+            blocked = (
+                ".env",
+                ".env.local",
+                "CREDENTIALS.json",
+                "SECRETS.yaml",
+                "id_rsa.pub",
+                "config/credentials/db.json",
+            )
+            for rel in blocked:
                 for tool_fn, extra in (
                     (runner.read_window_tool, None),
                     (runner.patch_tool, {"old_text": "x", "new_text": "y", "syntax_gate": False}),
@@ -302,7 +315,14 @@ def path_security_secrets_blocked(ctx: DoctorContext) -> tuple[str, str]:
                     )
                     if err:
                         return "fail", err
-            return "pass", "read_window_tool + patch_tool block .env and credentials"
+            # Lookalikes and secret-named ancestors must stay allowed.
+            nested = root / "Secret_Project" / "ws"
+            nested.mkdir(parents=True)
+            for rel in ("secretsmanager.py", "credentials-guide.md"):
+                decision = pre_tool_gate("patch", {"path": rel}, workspace=nested)
+                if decision.decision != "allow":
+                    return "fail", f"false positive block on {rel}: {decision.reason}"
+            return "pass", "read_window_tool + patch_tool block secret paths; lookalikes allowed"
     except ImportError as e:
         return "skip", f"cannot run: {e}"
 

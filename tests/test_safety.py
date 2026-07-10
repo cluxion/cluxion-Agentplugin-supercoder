@@ -45,6 +45,22 @@ def test_secret_paths_blocked(tmp_path: Path) -> None:
         assert "secret" in decision.reason
 
 
+def test_secret_paths_block_dotted_and_casefolded_variants(tmp_path: Path) -> None:
+    for rel in (".env.local", "CREDENTIALS.json", "SECRETS.yaml", "id_rsa.pub", "Keys/ID_RSA"):
+        decision = pre_tool_gate("patch", {"path": rel}, workspace=tmp_path)
+        assert decision.decision == "block", rel
+        assert "secret" in decision.reason
+
+
+def test_secret_paths_allow_lookalikes_and_secret_named_ancestor(tmp_path: Path) -> None:
+    # Ancestor directory names are out of scope: only workspace-relative parts gate.
+    nested_ws = tmp_path / "Secret_Project" / "workspace"
+    nested_ws.mkdir(parents=True)
+    for rel in ("src/app.py", "secretsmanager.py", "credentials-guide.md", "docs/mysecrets.txt"):
+        decision = pre_tool_gate("patch", {"path": rel}, workspace=nested_ws)
+        assert decision.decision == "allow", rel
+
+
 def test_oversized_write_blocked_only_for_write_tools(tmp_path: Path) -> None:
     blocked = pre_tool_gate("write_file", {"path": "a.py", "line_count": 401}, workspace=tmp_path)
     assert blocked.decision == "block"
