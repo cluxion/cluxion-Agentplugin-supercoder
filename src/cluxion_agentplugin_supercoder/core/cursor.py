@@ -64,6 +64,9 @@ def cursor_map(root: Path, *, paths: list[str] | None = None, max_files: int = 6
         return [{**entry, "purpose": "index"} for entry in scanned]
     entries: list[dict[str, object]] = []
     for rel in paths[:max_files]:
+        gate = pre_tool_gate("cursor_map", {"path": rel}, workspace=root)
+        if gate.decision == "block":
+            continue
         path = root / rel
         if not path.is_file():
             continue

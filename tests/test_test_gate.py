@@ -152,3 +152,15 @@ def test_test_gate_does_not_create_workspace_artifacts(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert not (tmp_path / ".cluxion-test-dispatch").exists()
     assert not list(tmp_path.glob(".cluxion-test-dispatch*"))
+
+
+def test_suggest_test_commands_excludes_workspace_escape_path(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    (sibling / "test_escape.py").write_text("def test_escape():\n    assert True\n", encoding="utf-8")
+    escape = "../sibling/test_escape.py"
+    payload = suggest_test_commands([escape], cwd=workspace)
+    assert escape not in payload["targets"]
+    assert escape not in str(payload["command"])

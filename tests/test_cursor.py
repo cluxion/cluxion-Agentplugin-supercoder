@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from cluxion_agentplugin_supercoder import runner
-from cluxion_agentplugin_supercoder.core.cursor import read_window
+from cluxion_agentplugin_supercoder.core.cursor import cursor_map, read_window
 
 
 def test_read_window_bounds(tmp_path: Path) -> None:
@@ -34,6 +34,20 @@ def test_read_window_blocks_sibling_directory_prefix_escape(tmp_path: Path) -> N
     (sibling / "secret.py").write_text("leaked", encoding="utf-8")
     with pytest.raises(PermissionError, match="workspace escape blocked"):
         read_window(workspace, "../work2/secret.py")
+
+
+def test_cursor_map_excludes_workspace_escape_path(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    outside = sibling / "secret.py"
+    outside.write_text("outside_secret = 1\n", encoding="utf-8")
+    entries = cursor_map(workspace, paths=["../sibling/secret.py"])
+    assert entries == []
+    blob = repr(entries)
+    assert "../sibling/secret.py" not in blob
+    assert "outside_secret" not in blob
 
 
 def test_read_window_blocks_plain_traversal(tmp_path: Path) -> None:

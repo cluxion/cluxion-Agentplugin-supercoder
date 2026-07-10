@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from cluxion_agentplugin_supercoder import rust_bridge
+from cluxion_agentplugin_supercoder.core.safety import pre_tool_gate
 
 _TEST_SCAN_MAX_FILES = 4096
 _NODE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx"}
@@ -100,6 +101,9 @@ def _resolve_test_targets(root: Path, files_changed: list[str]) -> list[str]:
     for raw in files_changed:
         rel = raw.strip()
         if not rel:
+            continue
+        gate = pre_tool_gate("test_gate", {"path": rel}, workspace=root)
+        if gate.decision == "block":
             continue
         path = Path(rel)
         if _is_test_file(path):
