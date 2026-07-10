@@ -89,7 +89,10 @@ def apply_patch(
     if not path.exists():
         return _failed(str(path), "missing_file", expected_file_hash, "file not found")
     with _exclusive_lock(path):
-        text = path.read_text(encoding="utf-8")
+        with path.open(encoding="utf-8", newline="") as source:
+            raw = source.read()
+        eol = "\r\n" if "\r\n" in raw else "\n"
+        text = _normalize_newlines(raw)
         current_hash = file_hash(text)
         if expected_file_hash and current_hash != _normalize_hash(expected_file_hash):
             return _failed(str(path), "stale_file", expected_file_hash, "file changed since cursor was created")
@@ -97,7 +100,7 @@ def apply_patch(
         if exact:
             start, end = exact[0]
             return _commit(
-                path, text, start, end, new_text, "exact", expected_file_hash or current_hash, current_hash, 1.0
+                path, text, start, end, new_text, "exact", expected_file_hash or current_hash, current_hash, 1.0, eol=eol
             )
         fuzzy = _fuzzy_span(text, old_text)
         if fuzzy and fuzzy[3] >= fuzzy_threshold and not fuzzy[4]:
@@ -111,6 +114,7 @@ def apply_patch(
                 expected_file_hash or current_hash,
                 current_hash,
                 fuzzy[3],
+                eol=eol,
             )
         return _failed(str(path), "no_match", expected_file_hash or current_hash, "patch target not found")
 
@@ -220,11 +224,15 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
 def _atomic_write(path: Path, content: str) -> None:
     """Atomic replace via temp in same dir + fsync to prevent corruption on crash."""
     dir_ = path.parent
-    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=dir_, delete=False, suffix=".tmp") as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", dir=dir_, delete=False, suffix=".tmp") as tmp:
         tmp.write(content)
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp_path = Path(tmp.name)
+    try:
+        os.chmod(tmp_path, os.stat(path).st_mode & 0o777)
+    except OSError:
+        pass
     os.replace(tmp_path, path)
 
 
@@ -238,8 +246,12 @@ def _commit(
     expected: str,
     matched: str,
     score: float,
+    *,
+    eol: str = "\n",
 ) -> PatchResult:
     updated = f"{text[:start]}{new_content}{text[end:]}"
+    if eol != "\n":
+        updated = updated.replace("\n", eol)
     _atomic_write(path, updated)
     return PatchResult(True, str(path), strategy, "patch applied", expected, matched, round(score, 4), 1)
 
