@@ -151,6 +151,19 @@ def test_unique_exact_match_commits(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "alpha\nBETA\ngamma\n"
 
 
+def test_crlf_patch_text_preserves_crlf(tmp_path: Path) -> None:
+    path = tmp_path / "a.py"
+    path.write_bytes(b"alpha\r\nbeta\r\ngamma\r\n")
+
+    result = apply_patch(path, old_text="beta\r\n", new_text="BETA\r\n")
+
+    updated = path.read_bytes()
+    assert result.success is True
+    assert result.strategy == "exact"
+    assert updated == b"alpha\r\nBETA\r\ngamma\r\n"
+    assert b"\r\r\n" not in updated
+
+
 def test_stale_patch_blocked(tmp_path: Path) -> None:
     path = tmp_path / "a.py"
     path.write_text("one\n", encoding="utf-8")

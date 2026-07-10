@@ -7,7 +7,7 @@ from pathlib import Path
 
 from cluxion_agentplugin_supercoder.core import lint_gate, repo_map, retry_loop, syntax_gate
 from cluxion_agentplugin_supercoder.core.cursor import cursor_map, read_window
-from cluxion_agentplugin_supercoder.core.hash_patch import apply_patch
+from cluxion_agentplugin_supercoder.core.hash_patch import apply_patch, revert_if_unchanged
 from cluxion_agentplugin_supercoder.core.line_budget import budget_for, is_coding_task
 from cluxion_agentplugin_supercoder.core.queue import plan_coding_task
 from cluxion_agentplugin_supercoder.core.safety import pre_tool_gate
@@ -138,17 +138,16 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
     target = root / rel
     old_text = str(payload.get("old_text", ""))
     try:
-        original_text = target.read_text(encoding="utf-8") if target.exists() else None
+        result = apply_patch(
+            target,
+            old_text=old_text,
+            new_text=str(payload.get("new_text", "")),
+            expected_file_hash=_expected_hash_from(payload),
+        )
     except UnicodeDecodeError as exc:
         return ToolResult(False, {"error": f"file is not valid UTF-8: {exc}"})
     except OSError as exc:
         return ToolResult(False, {"error": f"path is not a readable file: {exc}"})
-    result = apply_patch(
-        target,
-        old_text=old_text,
-        new_text=str(payload.get("new_text", "")),
-        expected_file_hash=_expected_hash_from(payload),
-    )
     body: dict[str, object] = {
         "file_path": result.file_path,
         "strategy": result.strategy,
@@ -163,12 +162,16 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
         if check["checked"] and not check["valid"]:
             # L1 gate: the patch broke the file's syntax. Roll the file back
             # and surface the parse errors so the host model can retry.
-            if original_text is not None:
-                target.write_text(original_text, encoding="utf-8")
-            body["strategy"] = "syntax_reverted"
-            body["message"] = "patch reverted: result does not parse"
+            reverted = revert_if_unchanged(target, result.pre_image_raw, result.post_hash)
+            strategy = "syntax_reverted" if reverted else "revert_failed"
+            body["strategy"] = strategy
+            body["message"] = (
+                "patch reverted: result does not parse"
+                if reverted
+                else "patch revert refused: file changed after patch"
+            )
             body["syntax_errors"] = check["errors"]
-            advice = retry_loop.record_failure(str(root), rel, "syntax_reverted", old_text=old_text)
+            advice = retry_loop.record_failure(str(root), rel, strategy, old_text=old_text)
             body["retry"] = advice.to_payload()
             return ToolResult(False, body)
     if result.success:

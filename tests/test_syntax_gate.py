@@ -132,6 +132,54 @@ def test_patch_reverts_on_broken_syntax(tmp_path: Path, backend: str) -> None:
     assert (tmp_path / "mod.py").read_text(encoding="utf-8") == original
 
 
+def test_syntax_revert_preserves_crlf_bytes(tmp_path: Path, backend: str) -> None:
+    path = tmp_path / "mod.py"
+    original = b"def add(a, b):\r\n    return a + b\r\n"
+    path.write_bytes(original)
+
+    result = runner.patch_tool(
+        {
+            "cwd": str(tmp_path),
+            "path": "mod.py",
+            "old_text": "    return a + b\n",
+            "new_text": "    return a +\n",
+            "expected_file_hash": file_hash(original.decode()),
+        }
+    )
+
+    assert result.ok is False
+    assert result.payload["strategy"] == "syntax_reverted"
+    assert path.read_bytes() == original
+
+
+def test_syntax_revert_refuses_concurrent_change(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "mod.py"
+    original = "def add(a, b):\n    return a + b\n"
+    concurrent = b"def concurrent():\n    return 2\n"
+    path.write_text(original, encoding="utf-8")
+    check_source = syntax_gate.check_source
+
+    def write_concurrently(*args, **kwargs):
+        check = check_source(*args, **kwargs)
+        path.write_bytes(concurrent)
+        return check
+
+    monkeypatch.setattr(syntax_gate, "check_source", write_concurrently)
+    result = runner.patch_tool(
+        {
+            "cwd": str(tmp_path),
+            "path": "mod.py",
+            "old_text": "    return a + b\n",
+            "new_text": "    return a +\n",
+            "expected_file_hash": file_hash(original),
+        }
+    )
+
+    assert result.ok is False
+    assert result.payload["strategy"] == "revert_failed"
+    assert path.read_bytes() == concurrent
+
+
 def test_patch_passes_gate_when_valid(tmp_path: Path, backend: str) -> None:
     digest = _write(tmp_path / "mod.py", "def add(a, b):\n    return a + b\n")
     result = runner.patch_tool(

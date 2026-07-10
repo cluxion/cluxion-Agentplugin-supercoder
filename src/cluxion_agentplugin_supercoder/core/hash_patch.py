@@ -64,6 +64,8 @@ class PatchResult:
     matched_hash: str | None = None
     similarity: float = 0.0
     replacements: int = 0
+    pre_image_raw: str = ""
+    post_hash: str = ""
 
 
 def file_hash(content: str) -> str:
@@ -86,6 +88,8 @@ def apply_patch(
 ) -> PatchResult:
     if not old_text:
         return _failed(str(path), "empty_old_text", expected_file_hash, "old_text must be non-empty")
+    old_text = _normalize_newlines(old_text)
+    new_text = _normalize_newlines(new_text)
     if not path.exists():
         return _failed(str(path), "missing_file", expected_file_hash, "file not found")
     with _exclusive_lock(path):
@@ -107,7 +111,17 @@ def apply_patch(
         if exact:
             start, end = exact[0]
             return _commit(
-                path, text, start, end, new_text, "exact", expected_file_hash or current_hash, current_hash, 1.0, eol=eol
+                path,
+                text,
+                start,
+                end,
+                new_text,
+                "exact",
+                expected_file_hash or current_hash,
+                current_hash,
+                1.0,
+                eol=eol,
+                pre_image_raw=raw,
             )
         fuzzy = _fuzzy_span(text, old_text)
         if fuzzy and fuzzy[3] >= fuzzy_threshold and not fuzzy[4]:
@@ -122,6 +136,7 @@ def apply_patch(
                 current_hash,
                 fuzzy[3],
                 eol=eol,
+                pre_image_raw=raw,
             )
         return _failed(str(path), "no_match", expected_file_hash or current_hash, "patch target not found")
 
@@ -243,6 +258,19 @@ def _atomic_write(path: Path, content: str) -> None:
     os.replace(tmp_path, path)
 
 
+def revert_if_unchanged(path: Path, pre_image_raw: str, expected_post_hash: str) -> bool:
+    with _exclusive_lock(path):
+        try:
+            with path.open(encoding="utf-8", newline="") as source:
+                current_raw = source.read()
+        except (OSError, UnicodeDecodeError):
+            return False
+        if file_hash(current_raw) != expected_post_hash:
+            return False
+        _atomic_write(path, pre_image_raw)
+        return True
+
+
 def _commit(
     path: Path,
     text: str,
@@ -255,16 +283,28 @@ def _commit(
     score: float,
     *,
     eol: str = "\n",
+    pre_image_raw: str,
 ) -> PatchResult:
     updated = f"{text[:start]}{new_content}{text[end:]}"
     if eol != "\n":
         updated = updated.replace("\n", eol)
     _atomic_write(path, updated)
-    return PatchResult(True, str(path), strategy, "patch applied", expected, matched, round(score, 4), 1)
+    return PatchResult(
+        True,
+        str(path),
+        strategy,
+        "patch applied",
+        expected,
+        matched,
+        round(score, 4),
+        1,
+        pre_image_raw,
+        file_hash(updated),
+    )
 
 
 def _failed(path: str, strategy: str, expected: str, message: str, score: float = 0.0) -> PatchResult:
     return PatchResult(False, path, strategy, message, expected, None, round(score, 4), 0)
 
 
-__all__ = ["PatchResult", "apply_patch", "file_hash", "hash_block"]
+__all__ = ["PatchResult", "apply_patch", "file_hash", "hash_block", "revert_if_unchanged"]
