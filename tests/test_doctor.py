@@ -164,6 +164,31 @@ def test_summary_critical_skip_is_degraded():
     assert r.ok is False
 
 
+def test_summary_high_skip_is_degraded():
+    from cluxion_agentplugin_supercoder.doctor.framework import CheckResult, DoctorResult
+
+    checks = (
+        CheckResult(check_id="a", category="c", severity="high", status="skip", detail="no probe"),
+        CheckResult(check_id="b", category="c", severity="medium", status="pass", detail="ok"),
+    )
+    r = DoctorResult(plugin="p", version="0.2.4", checks=checks)
+    assert r.summary == "degraded"
+    assert r.ok is False
+
+
+def test_summary_medium_or_low_skip_stays_ok():
+    from cluxion_agentplugin_supercoder.doctor.framework import CheckResult, DoctorResult
+
+    checks = (
+        CheckResult(check_id="a", category="c", severity="medium", status="skip", detail="no probe"),
+        CheckResult(check_id="b", category="c", severity="low", status="skip", detail="no probe"),
+        CheckResult(check_id="c", category="c", severity="high", status="pass", detail="ok"),
+    )
+    r = DoctorResult(plugin="p", version="0.2.4", checks=checks)
+    assert r.summary == "ok"
+    assert r.ok is True
+
+
 def test_summary_critical_fail_is_fail():
     from cluxion_agentplugin_supercoder.doctor.framework import CheckResult, DoctorResult
 
@@ -356,3 +381,246 @@ def test_hermes_workspace_probe_detects_ungated_read(monkeypatch):
     monkeypatch.setattr(Path, "is_relative_to", always_contained)
     status, _detail = hermes_context_workspace_root(_doctor_ctx())
     assert status == "fail"
+
+
+_CYCLE97_HIGH = (
+    "backend_chain_operational",
+    "syntax_gate_parser_available",
+    "repo_map_budget_integrity",
+    "json_error_handling_comprehensive",
+)
+
+
+def test_cycle97_high_probes_registered_and_pass():
+    cat = _catalog_path()
+    result = run_doctor(
+        cwd=Path.cwd(),
+        catalog_path=cat,
+        probes=PROBES,
+        plugin="supercoder",
+        version="0.2.42",
+    )
+    statuses = {c.check_id: c.status for c in result.checks}
+    for check_id in _CYCLE97_HIGH:
+        assert check_id in PROBES, f"missing probe registration: {check_id}"
+        assert statuses[check_id] == "pass", f"{check_id}: {statuses[check_id]}"
+    # medium/low remain intentionally unregistered this cycle
+    for check_id in (
+        "utf8_file_readability",
+        "concurrency_isolation",
+        "subprocess_binary_present",
+        "lint_gate_availability_graceful",
+    ):
+        assert check_id not in PROBES
+        assert statuses[check_id] == "skip"
+
+
+def test_missing_high_probe_marks_degraded():
+    partial = {k: v for k, v in PROBES.items() if k not in _CYCLE97_HIGH}
+    result = run_doctor(
+        cwd=Path.cwd(),
+        catalog_path=_catalog_path(),
+        probes=partial,
+        plugin="supercoder",
+        version="0.2.42",
+    )
+    statuses = {c.check_id: c.status for c in result.checks}
+    for check_id in _CYCLE97_HIGH:
+        assert statuses[check_id] == "skip"
+    assert result.summary == "degraded"
+    assert result.ok is False
+    payload = json.loads(render_json(result))
+    assert payload["summary"] == "degraded"
+    assert payload["ok"] is False
+
+
+def test_backend_chain_operational_passes_on_python_backend(monkeypatch):
+    from cluxion_agentplugin_supercoder import rust_bridge
+    from cluxion_agentplugin_supercoder.doctor.probes import backend_chain_operational
+
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "python")
+    status, detail = backend_chain_operational(_doctor_ctx())
+    assert status == "pass"
+    assert "backend=" in detail
+
+
+def test_backend_chain_operational_fails_on_ok_true_empty_entries(monkeypatch):
+    """ok=True with entries=[] must fail — silent file-drop scanners are unhealthy."""
+    from cluxion_agentplugin_supercoder.doctor import probes as probes_mod
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.rust_bridge.scan_repo_result",
+        lambda *_a, **_k: {"ok": True, "entries": []},
+    )
+    status, _detail = probes_mod.backend_chain_operational(_doctor_ctx())
+    assert status == "fail"
+
+
+def test_backend_chain_operational_fails_when_forced_subprocess_missing_bin(monkeypatch):
+    """Forced subprocess with missing INDEX_BIN must FAIL via scan_repo_result status.
+
+    Must not re-check binary presence itself — trust the typed ok/error result.
+    """
+    from cluxion_agentplugin_supercoder import rust_bridge
+    from cluxion_agentplugin_supercoder.doctor.probes import backend_chain_operational
+
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "subprocess")
+    monkeypatch.setenv(
+        rust_bridge.INDEX_BIN_ENV,
+        "/nonexistent/cluxion-missing-supercoder-index",
+    )
+    status, detail = backend_chain_operational(_doctor_ctx())
+    assert status == "fail"
+    low = detail.lower()
+    assert "ok" in low or "unavailable" in low or "backend" in low or "error" in low
+
+
+def test_backend_chain_operational_fails_on_bad_scan(monkeypatch):
+    from cluxion_agentplugin_supercoder.doctor import probes as probes_mod
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.rust_bridge.scan_repo_result",
+        lambda *_a, **_k: {
+            "ok": False,
+            "error": "backend_unavailable",
+            "message": "forced fail for probe",
+        },
+    )
+    status, detail = probes_mod.backend_chain_operational(_doctor_ctx())
+    assert status == "fail"
+    low = detail.lower()
+    assert "ok" in low or "unavailable" in low or "backend" in low or "error" in low
+
+
+def test_syntax_gate_parser_available_pass():
+    from cluxion_agentplugin_supercoder.doctor.probes import syntax_gate_parser_available
+
+    status, detail = syntax_gate_parser_available(_doctor_ctx())
+    assert status == "pass"
+    assert "python" in detail.lower() or "checked" in detail.lower()
+
+
+def test_syntax_gate_parser_available_fails_when_unchecked(monkeypatch):
+    from cluxion_agentplugin_supercoder.doctor import probes as probes_mod
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.core.syntax_gate.check_source",
+        lambda **_k: {"checked": False, "valid": True, "language": "python"},
+    )
+    status, _detail = probes_mod.syntax_gate_parser_available(_doctor_ctx())
+    assert status == "fail"
+
+
+def test_repo_map_budget_integrity_pass():
+    from cluxion_agentplugin_supercoder.doctor.probes import repo_map_budget_integrity
+
+    status, detail = repo_map_budget_integrity(_doctor_ctx())
+    assert status == "pass"
+    assert "mapped=" in detail
+    # Must exercise the real omit path under the production 200-char floor.
+    assert "omitted=" in detail
+    assert "truncated=" in detail
+
+
+def test_repo_map_budget_integrity_fails_on_contract_break(monkeypatch):
+    from cluxion_agentplugin_supercoder.doctor import probes as probes_mod
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.core.repo_map.build_repo_map",
+        lambda *_a, **_k: {
+            "ok": True,
+            "files_mapped": 1,
+            "files_omitted": 0,
+            "files_scanned": 2,
+            "truncated": False,
+            "map": "short",
+        },
+    )
+    status, detail = probes_mod.repo_map_budget_integrity(_doctor_ctx())
+    assert status == "fail"
+    assert "mapped" in detail.lower() or "scanned" in detail.lower()
+
+
+def test_repo_map_budget_integrity_fails_when_map_over_budget(monkeypatch):
+    """Plausible count invariants must not hide a map that exceeds the budget."""
+    from cluxion_agentplugin_supercoder.doctor import probes as probes_mod
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.core.repo_map.build_repo_map",
+        lambda *_a, **_k: {
+            "ok": True,
+            "files_mapped": 2,
+            "files_omitted": 3,
+            "files_scanned": 5,
+            "truncated": True,
+            "map": "x" * 10_000,
+        },
+    )
+    status, detail = probes_mod.repo_map_budget_integrity(_doctor_ctx())
+    assert status == "fail"
+    low = detail.lower()
+    assert "budget" in low or "len" in low or "map" in low or "200" in low
+
+
+def test_repo_map_budget_integrity_fails_when_no_omission(monkeypatch):
+    """No-omission result is a false pass under a tight budget fixture."""
+    from cluxion_agentplugin_supercoder.doctor import probes as probes_mod
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.core.repo_map.build_repo_map",
+        lambda *_a, **_k: {
+            "ok": True,
+            "files_mapped": 5,
+            "files_omitted": 0,
+            "files_scanned": 5,
+            "truncated": False,
+            "map": "short",
+        },
+    )
+    status, detail = probes_mod.repo_map_budget_integrity(_doctor_ctx())
+    assert status == "fail"
+    low = detail.lower()
+    assert "omit" in low or "truncated" in low
+
+
+def test_json_error_handling_comprehensive_pass():
+    from cluxion_agentplugin_supercoder.doctor.probes import json_error_handling_comprehensive
+
+    status, detail = json_error_handling_comprehensive(_doctor_ctx())
+    assert status == "pass"
+    assert "json" in detail.lower() or "ok" in detail.lower()
+
+
+def test_json_error_handling_comprehensive_fails_on_invalid_output(monkeypatch):
+    from cluxion_agentplugin_supercoder.doctor import probes as probes_mod
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.plugin._wrap",
+        lambda _cb: (lambda _args: "not-json{"),
+    )
+    status, detail = probes_mod.json_error_handling_comprehensive(_doctor_ctx())
+    assert status == "fail"
+    assert "json" in detail.lower() or "parse" in detail.lower() or "raised" in detail.lower()
+
+
+def test_cycle97_probe_exception_fails_not_skips(monkeypatch):
+    from cluxion_agentplugin_supercoder.doctor import probes as probes_mod
+
+    def boom(*_a, **_k):
+        raise RuntimeError("probe boom")
+
+    monkeypatch.setattr(
+        "cluxion_agentplugin_supercoder.rust_bridge.resolve_backend",
+        boom,
+    )
+    # Direct raise is converted by framework; probe itself must not swallow to skip.
+    result = run_doctor(
+        cwd=Path.cwd(),
+        catalog_path=_catalog_path(),
+        probes={"backend_chain_operational": probes_mod.backend_chain_operational},
+        plugin="supercoder",
+        version="0.2.42",
+    )
+    statuses = {c.check_id: c.status for c in result.checks}
+    assert statuses["backend_chain_operational"] == "fail"
+    assert statuses["backend_chain_operational"] != "skip"

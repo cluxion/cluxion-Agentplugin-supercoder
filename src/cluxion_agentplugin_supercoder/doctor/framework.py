@@ -51,7 +51,7 @@ class DoctorResult:
     def summary(self) -> str:
         if any(c.status == "fail" for c in self.checks):
             return "fail"
-        if any(c.severity == "critical" and c.status == "skip" for c in self.checks):
+        if any(c.severity in ("critical", "high") and c.status == "skip" for c in self.checks):
             return "degraded"
         return "ok"
 

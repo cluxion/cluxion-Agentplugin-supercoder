@@ -36,13 +36,13 @@ def _load_native() -> object | None:
     """
     global _native, _native_resolved
     if not _native_resolved:
-        _native_resolved = True
         try:
             import supercoder_index_native
 
             _native = supercoder_index_native
         except ImportError:
             _native = None
+        _native_resolved = True
     return _native
 
 

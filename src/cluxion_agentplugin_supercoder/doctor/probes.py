@@ -195,7 +195,6 @@ def repo_map_deterministic(ctx: DoctorContext) -> tuple[str, str]:
     try:
         from cluxion_agentplugin_supercoder.core.repo_map import build_repo_map
 
-        import tempfile
         # Fixed tiny fixture, not ctx.cwd: from a huge cwd the native scan walks the
         # whole tree unbounded and hangs. Determinism only needs a stable input.
         with tempfile.TemporaryDirectory() as _d:
@@ -398,4 +397,98 @@ def stale_cursor_protection_enforced(ctx: DoctorContext) -> tuple[str, str]:
         return "skip", f"cannot run: {e}"
 
 
-# note: other checks in catalog will be reported as skip (no probe)
+# Cycle 97 HIGH probes — exceptions fail (framework + local), never silent skip.
+@_register("backend_chain_operational")
+def backend_chain_operational(ctx: DoctorContext) -> tuple[str, str]:
+    from cluxion_agentplugin_supercoder.rust_bridge import resolve_backend, scan_repo_result
+
+    backend = resolve_backend()
+    if backend not in {"native", "subprocess", "python"}:
+        return "fail", f"unknown backend: {backend!r}"
+    # One real file: ok=True with empty entries is a silent drop and must fail.
+    # Use scan_repo_result (not scan_repo) so forced-backend typed errors surface;
+    # do not re-check binary presence — that belongs to subprocess_binary_present.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+        result = scan_repo_result(root, max_files=1)
+    if result.get("ok") is not True:
+        err = result.get("error") or result.get("message") or result
+        return "fail", f"scan_repo_result not ok: {err}"
+    entries = result.get("entries")
+    if not isinstance(entries, list):
+        return "fail", f"entries must be list, got {type(entries).__name__}"
+    if len(entries) != 1 or not isinstance(entries[0], dict) or entries[0].get("path") != "a.py":
+        return "fail", f"expected one entry path=a.py, got {entries!r}"
+    used = result.get("backend", backend)
+    return "pass", f"backend={used} scan_ok entries={len(entries)}"
+
+
+@_register("syntax_gate_parser_available")
+def syntax_gate_parser_available(ctx: DoctorContext) -> tuple[str, str]:
+    from cluxion_agentplugin_supercoder.core.syntax_gate import check_source
+
+    result = check_source(content="def f():\n    return 1\n", language="python")
+    if result.get("checked") is True and result.get("valid") is True:
+        return "pass", "python parser checked=True valid=True"
+    return "fail", f"unexpected syntax gate result: {result}"
+
+
+@_register("repo_map_budget_integrity")
+def repo_map_budget_integrity(ctx: DoctorContext) -> tuple[str, str]:
+    from cluxion_agentplugin_supercoder.core.repo_map import build_repo_map
+
+    # Production clamps budget_chars to max(200, …). Fixture must exceed that floor
+    # so omit/truncated paths are exercised (tiny files can still fit under 200).
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        for i in range(8):
+            body = "\n\n".join(f"def fn_{i}_{j}(value):\n    return value" for j in range(6))
+            (root / f"mod_{i}.py").write_text(body + "\n", encoding="utf-8")
+        result = build_repo_map(root, budget_chars=200)
+    if result.get("ok") is not True:
+        return "fail", f"build_repo_map not ok: {result}"
+    mapped = int(result["files_mapped"])
+    omitted = int(result["files_omitted"])
+    scanned = int(result["files_scanned"])
+    truncated = bool(result["truncated"])
+    map_text = result.get("map")
+    if mapped + omitted != scanned:
+        return "fail", f"mapped+omitted!=scanned ({mapped}+{omitted}!={scanned})"
+    if omitted <= 0:
+        return "fail", f"expected omissions under tight budget, omitted={omitted}"
+    if truncated is not True:
+        return "fail", f"expected truncated=True, got {truncated}"
+    if not isinstance(map_text, str):
+        return "fail", f"map must be str, got {type(map_text).__name__}"
+    if len(map_text) > 200:
+        return "fail", f"map exceeds budget: len={len(map_text)}"
+    return (
+        "pass",
+        f"mapped={mapped} omitted={omitted} scanned={scanned} truncated={truncated} map_len={len(map_text)}",
+    )
+
+
+@_register("json_error_handling_comprehensive")
+def json_error_handling_comprehensive(ctx: DoctorContext) -> tuple[str, str]:
+    from cluxion_agentplugin_supercoder import runner
+    from cluxion_agentplugin_supercoder.plugin import _wrap
+
+    # Invalid runner input must still yield parseable JSON with ok/error contract.
+    raw = _wrap(runner.read_window_tool)({"cwd": "/nonexistent", "path": "x.py"})
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return "fail", f"unparseable JSON: {exc}; raw={raw[:120]!r}"
+    if not isinstance(parsed, dict):
+        return "fail", f"JSON root not object: {type(parsed).__name__}"
+    if "ok" not in parsed:
+        return "fail", f"missing ok key: {parsed}"
+    if parsed.get("ok") is not False:
+        return "fail", f"expected ok=false for invalid input: {parsed}"
+    if "error" not in parsed:
+        return "fail", f"missing error key: {parsed}"
+    return "pass", "invalid runner input returns parseable ok/error JSON"
+
+
+# note: medium/low catalog checks remain skip (no probe) this cycle

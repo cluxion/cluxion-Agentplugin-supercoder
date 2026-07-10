@@ -12,6 +12,10 @@ from cluxion_agentplugin_supercoder.doctor import render_json, render_text, run_
 from cluxion_agentplugin_supercoder.doctor.probes import PROBES
 from cluxion_agentplugin_supercoder.rust_bridge import index_available, resolve_backend
 
+# Max dict/list nesting accepted on JSON stdin after json.loads.
+# Independent of CPython's json recursion limit (which varies by version; 3.14 accepts ~10k).
+MAX_JSON_CONTAINER_DEPTH = 128
+
 _JSON_COMMANDS = {
     "plan": runner.plan,
     "read-window": runner.read_window_tool,
@@ -23,6 +27,23 @@ _JSON_COMMANDS = {
     "test-gate": runner.test_gate_tool,
     "brief": runner.brief_tool,
 }
+
+
+def _json_container_depth_exceeded(value: object, max_depth: int = MAX_JSON_CONTAINER_DEPTH) -> bool:
+    """Return True if any dict/list nesting exceeds max_depth (iterative; no recursion)."""
+    stack: list[tuple[object, int]] = [(value, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if not isinstance(node, (dict, list)):
+            continue
+        if depth > max_depth:
+            return True
+        children = node.values() if isinstance(node, dict) else node
+        next_depth = depth + 1
+        for child in children:
+            if isinstance(child, (dict, list)):
+                stack.append((child, next_depth))
+    return False
 
 
 def _json_error(error: str, message: str, hint: str) -> str:
@@ -116,6 +137,11 @@ def _run_json_command(command: str, json_stdin: bool) -> int:
         print(_json_error("invalid_json", "invalid JSON stdin: not valid UTF-8", "Pass UTF-8 encoded JSON on stdin."))
         return 2
     except RecursionError:
+        # Older interpreters may raise during json.loads on deep nesting; keep structured shape.
+        print(_json_error("invalid_json", "invalid JSON stdin: nesting too deep", "Reduce JSON nesting depth."))
+        return 2
+    # Enforce a stable depth ceiling after loads (e.g. Python 3.14 accepts very deep JSON).
+    if _json_container_depth_exceeded(payload):
         print(_json_error("invalid_json", "invalid JSON stdin: nesting too deep", "Reduce JSON nesting depth."))
         return 2
     if not isinstance(payload, dict):

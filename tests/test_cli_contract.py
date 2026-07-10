@@ -34,11 +34,57 @@ def test_cli_reports_bad_json_stdin(monkeypatch, capsys) -> None:
 
 def test_cli_reports_deeply_nested_json_stdin(monkeypatch, capsys) -> None:
     # adversarial: ~10k nesting must give a clean error, not a raw RecursionError traceback
+    # regression: Python 3.14+ json.loads accepts deep nesting; SC still enforces max depth
     deep = '{"x":' + "[" * 10000 + "]" * 10000 + "}"
     monkeypatch.setattr("sys.stdin", type("Stdin", (), {"read": lambda self: deep})())
 
     assert cli.main(["plan", "--json-stdin"]) == 2
 
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"] == "invalid_json"
+    assert "nesting too deep" in payload["message"]
+
+
+def test_cli_accepts_json_stdin_at_max_container_depth(tmp_path, monkeypatch, capsys) -> None:
+    # boundary: root (depth 1) + (MAX-1) nested lists under "pad" => depth MAX accepted
+    pad: object = 0
+    for _ in range(cli.MAX_JSON_CONTAINER_DEPTH - 1):
+        pad = [pad]
+    body = json.dumps({"prompt": "fix tests", "cwd": str(tmp_path), "pad": pad})
+    monkeypatch.setattr("sys.stdin", type("Stdin", (), {"read": lambda self, b=body: b})())
+
+    assert cli.main(["plan", "--json-stdin"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+
+
+def test_cli_rejects_json_stdin_beyond_max_container_depth(monkeypatch, capsys) -> None:
+    # boundary: 129 nested dict containers must be rejected with the structured nesting error
+    nested = "{}"
+    for _ in range(cli.MAX_JSON_CONTAINER_DEPTH):
+        nested = '{"x":' + nested + "}"
+    monkeypatch.setattr("sys.stdin", type("Stdin", (), {"read": lambda self, n=nested: n})())
+
+    assert cli.main(["plan", "--json-stdin"]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"] == "invalid_json"
+    assert "nesting too deep" in payload["message"]
+    assert payload["hint"]
+
+
+def test_cli_rejects_mixed_dict_list_nesting_beyond_max_depth(monkeypatch, capsys) -> None:
+    # mixed dict/list containers still count toward the depth limit (129 levels)
+    node: object = 0
+    for i in range(cli.MAX_JSON_CONTAINER_DEPTH + 1):
+        node = [node] if i % 2 == 0 else {"x": node}
+    monkeypatch.setattr(
+        "sys.stdin",
+        type("Stdin", (), {"read": lambda self, n=node: json.dumps(n)})(),
+    )
+
+    assert cli.main(["plan", "--json-stdin"]) == 2
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
     assert payload["error"] == "invalid_json"

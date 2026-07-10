@@ -53,3 +53,60 @@ def test_native_import_is_lazy() -> None:
     backend = rust_bridge.resolve_backend()
     assert backend in ("native", "subprocess", "python")
     assert rust_bridge._native_resolved is True
+
+
+def test_native_load_does_not_publish_resolved_before_native() -> None:
+    """_native_resolved must stay False until _native is assigned.
+
+    Publishing resolved=True before the import finishes lets parallel doctor
+    probes observe resolved=True/native=None and pick python/subprocess.
+    """
+    import builtins
+    import threading
+    import types
+
+    original_native = rust_bridge._native
+    original_resolved = rust_bridge._native_resolved
+    real_import = builtins.__import__
+    started = threading.Event()
+    release = threading.Event()
+    sentinel = types.ModuleType("supercoder_index_native")
+    holder: list[object | None] = []
+    load_result: object | None = None
+    resolved_after: bool | None = None
+    worker: threading.Thread | None = None
+
+    def fake_import(name: str, globals=None, locals=None, fromlist=(), level=0):
+        if name == "supercoder_index_native":
+            started.set()
+            if not release.wait(timeout=5.0):
+                raise TimeoutError("release event not set during native import")
+            return sentinel
+        return real_import(name, globals, locals, fromlist, level)
+
+    try:
+        rust_bridge._native = None
+        rust_bridge._native_resolved = False
+        builtins.__import__ = fake_import  # type: ignore[assignment]
+
+        def run_load() -> None:
+            holder.append(rust_bridge._load_native())
+
+        worker = threading.Thread(target=run_load)
+        worker.start()
+        assert started.wait(timeout=5.0), "native import never started"
+        # While import is blocked, resolution must not be published yet.
+        assert rust_bridge._native_resolved is False
+        assert rust_bridge._native is None
+    finally:
+        release.set()
+        if worker is not None:
+            worker.join(timeout=5.0)
+        load_result = holder[0] if holder else None
+        resolved_after = rust_bridge._native_resolved
+        builtins.__import__ = real_import  # type: ignore[assignment]
+        rust_bridge._native = original_native
+        rust_bridge._native_resolved = original_resolved
+
+    assert load_result is sentinel
+    assert resolved_after is True
