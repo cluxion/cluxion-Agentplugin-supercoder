@@ -94,14 +94,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             return int(exc.code)
         raise
     if args.command == "check":
+        available = index_available()
         payload = {
             "plugin": "cluxion-agentplugin-supercoder",
             "version": __version__,
-            "rust_index": index_available(),
+            "rust_index": available,
             "index_backend": resolve_backend(),
         }
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-        return 0
+        return 0 if available else 1
     if args.command == "doctor":
         catalog_path = files("cluxion_agentplugin_supercoder.doctor") / "catalog.json"
         result = run_doctor(

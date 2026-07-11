@@ -372,3 +372,51 @@ def test_syntax_finding_snippet_uses_lf_only_line_semantics() -> None:
     line_no = result["errors"][0]["line"]
     if 0 < line_no <= len(lines):
         assert result["errors"][0]["snippet"] == lines[line_no - 1][:120]
+
+
+def test_public_syntax_description_matches_runtime_routing() -> None:
+    """Schema/docs/catalog must mirror runtime: stdlib python/json/toml; tree-sitter rust/js/ts/tsx."""
+    import json
+    import re
+    from pathlib import Path
+
+    from cluxion_agentplugin_supercoder.schemas import SYNTAX_GATE_SCHEMA
+
+    stdlib = set(syntax_gate.PYTHON_TIER_LANGUAGES)
+    tree_sitter = {"rust", "javascript", "typescript", "tsx"}
+    assert stdlib == {"python", "json", "toml"}
+
+    # Identifier list after "tree-sitter:" / "tree-sitter handles" (punctuation-tolerant, not prose-open).
+    _ts_list = re.compile(
+        r"tree-sitter(?:\s*:\s*|\s+handles\s+)((?:[a-z0-9_]+)(?:\s*[/,]\s*[a-z0-9_]+)*)",
+        re.I,
+    )
+    _aliases = {"js": "javascript", "ts": "typescript"}
+
+    def tree_sitter_langs(text: str) -> set[str]:
+        match = _ts_list.search(text)
+        assert match is not None, f"missing tree-sitter language clause: {text[:160]!r}"
+        raw = {part.strip().lower() for part in re.split(r"[/,]", match.group(1)) if part.strip()}
+        return {_aliases.get(lang, lang) for lang in raw}
+
+    catalog = json.loads(Path("src/cluxion_agentplugin_supercoder/doctor/catalog.json").read_text(encoding="utf-8"))
+    what = next(item["what_it_checks"] for item in catalog if item["check_id"] == "syntax_gate_parser_available")
+    sources = {
+        "schema": SYNTAX_GATE_SCHEMA["description"],
+        "catalog": what,
+        "tools.md": Path("Docs/tools.md").read_text(encoding="utf-8"),
+        "design.md": Path("Docs/design.md").read_text(encoding="utf-8"),
+    }
+    for name, source in sources.items():
+        langs = tree_sitter_langs(source.lower())
+        assert langs == tree_sitter, name
+        assert stdlib.isdisjoint(langs), f"{name}: stdlib langs claimed under tree-sitter: {langs & stdlib}"
+
+    desc = SYNTAX_GATE_SCHEMA["description"].lower()
+    std_match = re.search(
+        r"stdlib(?:\s*:\s*|\s+always\s+handles\s+)((?:[a-z0-9_]+)(?:\s*[/,]\s*[a-z0-9_]+)*)",
+        desc,
+    )
+    assert std_match is not None
+    std_langs = {part.strip() for part in re.split(r"[/,]", std_match.group(1)) if part.strip()}
+    assert std_langs == stdlib

@@ -67,3 +67,37 @@ def test_repo_map_deterministic(tmp_path) -> None:
     r1 = runner.repo_map_tool({"cwd": str(tmp_path)})
     r2 = runner.repo_map_tool({"cwd": str(tmp_path)})
     assert r1.to_json() == r2.to_json()
+
+
+def test_plugin_wrap_returns_json_for_symlink_loop_path(tmp_path) -> None:
+    """Cyclic symlink tool paths fail closed via path gate; plugin returns structured JSON."""
+    link_a = tmp_path / "loop_a"
+    link_b = tmp_path / "loop_b"
+    link_a.symlink_to(link_b)
+    link_b.symlink_to(link_a)
+
+    wrapped = plugin._wrap(runner.read_window_tool)
+    res = json.loads(wrapped({"cwd": str(tmp_path), "path": "loop_a"}))
+
+    assert res["ok"] is False
+    assert "error" in res
+    # Path-gate fail-closed reason (not a bare FileNotFoundError of the rel path).
+    err = str(res["error"]).lower()
+    assert err != "loop_a"
+    assert any(token in err for token in ("path", "resolv", "symlink", "block"))
+
+
+def test_plugin_wrap_returns_json_for_cyclic_cwd(tmp_path) -> None:
+    """Cyclic cwd must not leak RuntimeError; public wrapped tools return {ok:false,error}."""
+    link_a = tmp_path / "loop_a"
+    link_b = tmp_path / "loop_b"
+    link_a.symlink_to(link_b)
+    link_b.symlink_to(link_a)
+
+    wrapped = plugin._wrap(runner.repo_map_tool)
+    raw = wrapped({"cwd": str(link_a)})
+    res = json.loads(raw)
+
+    assert res["ok"] is False
+    assert "error" in res
+    assert isinstance(res["error"], str) and res["error"]

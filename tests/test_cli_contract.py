@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -106,3 +107,82 @@ def test_cli_reports_invalid_utf8_stdin(monkeypatch, capsys, command) -> None:
     assert payload["error"] == "invalid_json"
     assert "not valid UTF-8" in payload["message"]
     assert payload["hint"]
+
+
+def test_check_fails_for_forced_missing_subprocess_backend(monkeypatch, capsys) -> None:
+    """Forced subprocess with a missing binary must report rust_index:false and rc 1."""
+    from cluxion_agentplugin_supercoder import rust_bridge
+
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "subprocess")
+    monkeypatch.setenv(rust_bridge.INDEX_BIN_ENV, "/nonexistent/cluxion-missing-supercoder-index")
+
+    rc = cli.main(["check"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert payload["rust_index"] is False
+    assert payload["index_backend"] == "subprocess"
+
+
+def test_check_fails_for_forced_nonfunctional_subprocess_backend(monkeypatch, capsys) -> None:
+    """Forced subprocess path that exists but is nonfunctional must not claim rust_index:true.
+
+    Presence-only health (shutil.which / file exists) is insufficient: the Python
+    executable exists on every supported host but cannot serve the index protocol.
+    """
+    from cluxion_agentplugin_supercoder import rust_bridge
+
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "subprocess")
+    monkeypatch.setenv(rust_bridge.INDEX_BIN_ENV, sys.executable)
+
+    rc = cli.main(["check"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert payload["rust_index"] is False
+    assert payload["index_backend"] == "subprocess"
+
+
+def test_check_fails_for_forced_nonfunctional_native_backend(monkeypatch, capsys) -> None:
+    """Forced native object that exists but cannot process_json must not claim rust_index:true.
+
+    Import/object presence alone is insufficient: the selected backend must be
+    operationally able to process JSON index commands.
+    """
+    from cluxion_agentplugin_supercoder import rust_bridge
+
+    class NonfunctionalNative:
+        """Importable stand-in whose actual run entry point is broken."""
+
+        def run(self, *_args, **_kwargs):
+            raise RuntimeError("native run is nonfunctional")
+
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "native")
+    monkeypatch.setattr(rust_bridge, "_load_native", lambda: NonfunctionalNative())
+
+    rc = cli.main(["check"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert payload["rust_index"] is False
+    assert payload["index_backend"] == "native"
+
+
+def test_check_fails_for_native_success_without_scan_entries(monkeypatch, capsys) -> None:
+    """A protocol shell returning only ok=true is not an operational index."""
+    from cluxion_agentplugin_supercoder import rust_bridge
+
+    class IncompleteNative:
+        @staticmethod
+        def run(_command: str, _payload: str) -> str:
+            return json.dumps({"ok": True})
+
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "native")
+    monkeypatch.setattr(rust_bridge, "_load_native", lambda: IncompleteNative())
+
+    rc = cli.main(["check"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert payload["rust_index"] is False
+    assert payload["index_backend"] == "native"

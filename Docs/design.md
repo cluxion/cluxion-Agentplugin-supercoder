@@ -65,7 +65,7 @@ budget을 넘는 파일은 `files_omitted`에 집계됩니다. `supercoder_plan`
 
 ## Syntax and lint gates
 
-- `supercoder_syntax_gate` — tree-sitter parse-check (python/rust/js/ts/tsx/json; toml stdlib); unsupported languages fail-open
+- `supercoder_syntax_gate` — parse-check (stdlib: python/json/toml; tree-sitter: rust/js/ts/tsx); unsupported languages fail-open
 - `supercoder_lint_gate` — advisory ruff (suggest-only, never blocks)
 - `supercoder_patch` — 기본 `syntax_gate=true` (parse 실패 시 revert), `lint_gate=true` (advisory findings)
 

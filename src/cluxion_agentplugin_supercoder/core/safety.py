@@ -48,8 +48,14 @@ def pre_tool_gate(
 
 def _path_gate(workspace: Path, rel_or_abs: str) -> SafetyDecision:
     candidate = Path(rel_or_abs)
-    workspace_resolved = workspace.resolve()
-    resolved = (workspace / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+    target = candidate if candidate.is_absolute() else workspace / candidate
+    try:
+        workspace_resolved = workspace.resolve()
+        # Symlink final components use strict resolve so cyclic links raise
+        # OSError/RuntimeError and fail closed; missing plain paths stay non-strict.
+        resolved = target.resolve(strict=True) if target.is_symlink() else target.resolve()
+    except (OSError, RuntimeError):
+        return SafetyDecision("block", "path resolution failed")
     # String-prefix comparison would let sibling dirs through (/work vs /work2),
     # so containment is checked path-component-wise.
     if not resolved.is_relative_to(workspace_resolved):

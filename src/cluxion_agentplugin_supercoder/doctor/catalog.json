@@ -130,17 +130,17 @@
     "check_id": "handler_exception_coverage",
     "category": "handler",
     "severity": "medium",
-    "what_it_checks": "_wrap catches OSError/TypeError (IsADirectoryError, bad numeric args) → error JSON, never raises to host",
-    "failure_symptom": "Traceback escapes into the Hermes host on a directory path or non-numeric arg",
+    "what_it_checks": "_wrap catches OSError/TypeError/RuntimeError (IsADirectoryError, bad numeric args, cyclic cwd resolve) → error JSON, never raises to host",
+    "failure_symptom": "Traceback escapes into the Hermes host on a directory path, non-numeric arg, or cyclic cwd symlink loop",
     "likely_causes": [
-      "_wrap only caught (ValueError, FileNotFoundError, PermissionError)"
+      "_wrap only caught (ValueError, FileNotFoundError, PermissionError) and omitted RuntimeError"
     ],
     "fix_steps": [
-      "Broaden _wrap except to (ValueError, TypeError, OSError)",
+      "Broaden _wrap except to (ValueError, TypeError, OSError, RuntimeError)",
       "Coerce payload ints defensively in runner.py"
     ],
-    "change_robust": "Invokes a handler with a directory path / non-numeric arg and asserts error JSON",
-    "detection_method": "handler raising IsADirectoryError/TypeError yields {ok:false,...}"
+    "change_robust": "Invokes a handler with a directory path / non-numeric arg / cyclic cwd and asserts error JSON",
+    "detection_method": "handler raising IsADirectoryError/TypeError/RuntimeError yields {ok:false,...}"
   },
   {
     "check_id": "repo_map_deterministic",
@@ -271,7 +271,7 @@
     "check_id": "syntax_gate_parser_available",
     "category": "native_backend",
     "severity": "high",
-    "what_it_checks": "Whether the syntax gate can parse the target language. Native and subprocess tiers support python/rust/js/ts/tsx/json via tree-sitter; python tier supports only python/json/toml via stdlib. Fail-open: unknown languages report checked=False and valid=True.",
+    "what_it_checks": "Whether the syntax gate can parse the target language. stdlib always handles python/json/toml (backend-independent); native/subprocess tree-sitter handles rust/js/ts/tsx. Fail-open: unknown languages report checked=False and valid=True.",
     "failure_symptom": "Patches with broken syntax pass the gate when they should be reverted. Invalid Rust/JS/TS code applies without error. Syntax errors not caught, code compiles/runs incorrectly.",
     "likely_causes": [
       "Python backend in use (CLUXION_SUPERCODER_BACKEND=python) but code is Rust/JS/TS — these languages not supported by python tier",

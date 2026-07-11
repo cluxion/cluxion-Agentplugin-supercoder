@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 INDEX_BIN_ENV = "CLUXION_SUPERCODER_INDEX_BIN"
@@ -60,8 +61,48 @@ def resolve_backend() -> str:
 
 
 def index_available() -> bool:
-    """Return True when any index backend is usable (always true: python fallback)."""
-    return True
+    """Return True when the selected backend is operational (not merely present).
+
+    Forced native/subprocess require a tiny check-boundary protocol smoke
+    (``scan_repo_result`` with ``max_files=1``). Presence alone is insufficient:
+    a forced binary/object that cannot speak the JSON protocol must report False.
+    Python (and auto resolving to python) remains available without that probe.
+    This is not a hot-path or daemon health check.
+    """
+    backend = resolve_backend()
+    if backend == "python":
+        return True
+    if backend == "native":
+        if _load_native() is None:
+            return False
+    elif backend == "subprocess":
+        if shutil.which(_binary()) is None:
+            return False
+    else:
+        return True
+
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+            result = scan_repo_result(root, max_files=1)
+    except Exception:
+        return False
+    if result.get("ok") is not True or result.get("fallback_from"):
+        return False
+    entries = result.get("entries")
+    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+        return False
+    entry = entries[0]
+    total_lines = entry.get("total_lines")
+    return (
+        entry.get("path") == "a.py"
+        and isinstance(entry.get("file_hash"), str)
+        and bool(entry["file_hash"])
+        and isinstance(total_lines, int)
+        and not isinstance(total_lines, bool)
+        and total_lines >= 1
+    )
 
 
 def scan_repo(

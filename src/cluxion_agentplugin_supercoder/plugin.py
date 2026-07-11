@@ -156,7 +156,7 @@ def _wrap(callback: Callable[[dict[str, object]], runner.ToolResult]) -> Callabl
         args = args if isinstance(args, Mapping) else {}
         try:
             return callback(args).to_json()
-        except (ValueError, TypeError, OSError) as exc:
+        except (ValueError, TypeError, OSError, RuntimeError) as exc:
             return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, sort_keys=True)
 
     return handler

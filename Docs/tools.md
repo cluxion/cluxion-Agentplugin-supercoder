@@ -40,7 +40,7 @@ hash 검증 patch. `expected_file_hash` 없으면 stale로 거부.
 
 ## `supercoder_syntax_gate`
 
-파일 또는 snippet parse-check (tree-sitter: python/rust/js/ts/tsx/json; stdlib: toml). 미지원 언어는 fail-open.
+파일 또는 snippet parse-check (stdlib: python/json/toml; tree-sitter: rust/js/ts/tsx). 미지원 언어는 fail-open.
 
 입력: `path` 또는 `content`, `files_changed` 집계 모드, `language`, `cwd`
 

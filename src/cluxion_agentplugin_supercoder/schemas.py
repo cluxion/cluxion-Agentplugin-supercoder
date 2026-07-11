@@ -67,7 +67,7 @@ PATCH_SCHEMA = {
 
 SYNTAX_GATE_SCHEMA = {
     "name": "supercoder_syntax_gate",
-    "description": "Parse-check a file or snippet (tree-sitter: python/rust/js/ts/tsx/json; stdlib: toml). Fail-open for unsupported languages.",
+    "description": "Parse-check a file or snippet (stdlib: python/json/toml; tree-sitter: rust/js/ts/tsx). Fail-open for unsupported languages.",
     "parameters": {
         "type": "object",
         "properties": {
