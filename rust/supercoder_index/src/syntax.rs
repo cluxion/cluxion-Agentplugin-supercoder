@@ -15,7 +15,8 @@ use crate::IndexError;
 const MAX_REPORTED_ERRORS: usize = 20;
 const SNIPPET_MAX_CHARS: usize = 120;
 
-pub const SUPPORTED_LANGUAGES: [&str; 6] = ["python", "rust", "javascript", "typescript", "tsx", "json"];
+pub const SUPPORTED_LANGUAGES: [&str; 6] =
+    ["python", "rust", "javascript", "typescript", "tsx", "json"];
 
 pub fn syntax_check(payload: &Value) -> Result<Value, IndexError> {
     let content = match payload.get("content").and_then(Value::as_str) {
@@ -115,7 +116,11 @@ fn collect_errors(root: Node<'_>, source: &str, errors: &mut Vec<Value>) {
                 .get(start.row)
                 .map(|line| truncate(line, SNIPPET_MAX_CHARS))
                 .unwrap_or_default();
-            let kind = if node.is_missing() { "missing" } else { "error" };
+            let kind = if node.is_missing() {
+                "missing"
+            } else {
+                "error"
+            };
             let message = if node.is_missing() {
                 format!("missing {}", node.kind())
             } else {
@@ -178,6 +183,18 @@ mod tests {
         assert_eq!(check("fn main( { let = ; }", "rust")["valid"], false);
         assert_eq!(check("{\"a\": 1}", "json")["valid"], true);
         assert_eq!(check("fn main() {}", "rust")["valid"], true);
+    }
+
+    #[test]
+    fn rust_borrow_of_identifier_named_raw_is_valid() {
+        let source = "fn f(raw: String) { let _ = foo(&raw); }";
+        assert_eq!(check(source, "rust")["valid"], true);
+    }
+
+    #[test]
+    fn rust_raw_borrow_syntax_is_valid() {
+        let source = "fn f(mut x: i32) { let _ = &raw const x; let _ = &raw mut x; }";
+        assert_eq!(check(source, "rust")["valid"], true);
     }
 
     #[test]

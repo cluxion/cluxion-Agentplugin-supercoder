@@ -88,6 +88,18 @@ def test_rust_checked_only_with_treesitter(backend: str) -> None:
         assert result["valid"] is False
 
 
+def test_rust_identifier_named_raw_can_be_borrowed(backend: str) -> None:
+    result = syntax_gate.check_source(
+        content="fn f(raw: String) { let _ = foo(&raw); }",
+        language="rust",
+    )
+    if backend == "python":
+        assert result["checked"] is False
+    else:
+        assert result["checked"] is True
+        assert result["valid"] is True
+
+
 def test_backend_failure_falls_back_to_python_tier(monkeypatch) -> None:
     def boom(command: str, payload: dict[str, object]) -> dict[str, object]:
         raise RuntimeError("backend down")
