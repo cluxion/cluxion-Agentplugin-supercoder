@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "supercoder-index-native"
 version = "0.2.0"
-description = "Native repo index engine for cluxion-Agentplugin-supercoder (PyO3)."
+description = "Native repo index engine for clx-supercoder (PyO3)."
 requires-python = ">=3.11"
 license = "Apache-2.0"
 

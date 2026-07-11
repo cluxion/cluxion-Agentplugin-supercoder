@@ -25,15 +25,15 @@ uv run ruff check .
 Local path example:
 
 ```bash
-codex plugin marketplace add cluxion-local /path/to/cluxion-Agentplugin-supercoder
-codex plugin add cluxion-agentplugin-supercoder@cluxion-local
+codex plugin marketplace add cluxion-local /path/to/clx-supercoder
+codex plugin add clx-supercoder@cluxion-local
 ```
 
 Git URL example:
 
 ```bash
-codex plugin marketplace add cluxion https://github.com/cluxion/cluxion-Agentplugin-supercoder
-codex plugin add cluxion-agentplugin-supercoder@cluxion
+codex plugin marketplace add cluxion https://github.com/cluxion/clx-supercoder
+codex plugin add clx-supercoder@cluxion
 ```
 
 Do not use a `[plugins.<name>] command = [...]` block; Codex plugins are marketplace plugins.

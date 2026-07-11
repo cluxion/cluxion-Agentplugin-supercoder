@@ -7,6 +7,12 @@ from pathlib import Path
 
 import yaml
 
+# Discovery / public plugin identity (marketplace + surface manifests).
+# Python dist name, CLI, wheels, and Hermes entry points stay on the legacy package id.
+CANONICAL_PLUGIN_ID = "clx-supercoder"
+PYTHON_DIST_NAME = "cluxion-agentplugin-supercoder"
+PUBLIC_REPO_URL = "https://github.com/cluxion/clx-supercoder"
+
 
 def test_root_plugin_artifacts_are_version_synced() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -18,6 +24,9 @@ def test_root_plugin_artifacts_are_version_synced() -> None:
     init_source = Path("src/cluxion_agentplugin_supercoder/__init__.py").read_text(encoding="utf-8")
     fallback = re.search(r'__version__ = "([^"]+)"', init_source)
 
+    assert claude["name"] == CANONICAL_PLUGIN_ID
+    assert codex["name"] == CANONICAL_PLUGIN_ID
+    assert root_yaml["name"] == CANONICAL_PLUGIN_ID
     assert claude["version"] == version
     assert codex["version"] == version
     assert str(root_yaml["version"]) == version
@@ -37,5 +46,22 @@ def test_marketplace_manifest_is_version_synced() -> None:
     version = pyproject["project"]["version"]
 
     marketplace = json.loads(Path(".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+    assert marketplace["name"] == CANONICAL_PLUGIN_ID
+    assert marketplace["plugins"][0]["name"] == CANONICAL_PLUGIN_ID
     assert marketplace["plugins"][0]["version"] == version
     assert marketplace["plugins"][0]["source"] == "./"
+
+
+def test_python_dist_identity_stays_compat_while_public_urls_use_canonical() -> None:
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject["project"]
+    urls = project["urls"]
+    scripts = project["scripts"]
+    hermes = project["entry-points"]["hermes_agent.plugins"]
+
+    assert project["name"] == PYTHON_DIST_NAME
+    assert PYTHON_DIST_NAME in hermes
+    assert "cluxion-supercoder" in scripts
+    assert urls["Homepage"] == PUBLIC_REPO_URL
+    assert urls["Repository"] == PUBLIC_REPO_URL
+    assert urls["Issues"] == f"{PUBLIC_REPO_URL}/issues"

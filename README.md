@@ -2,7 +2,7 @@
 
 ======== 한국어 ========
 
-# cluxion-agentplugin-supercoder
+# clx-supercoder
 
 AI 에이전트(Hermes Agent, Claude Code, Codex)를 위한 코딩 플러그인입니다. 모델이 — 작은 로컬
 모델이라도 — 코드를 안전하고 정확하게 편집하도록 돕습니다. 모든 패치는 편집 대상 파일과 대조해
@@ -67,8 +67,8 @@ Hermes 안에서는 `supercoder_doctor` 도구로도 노출됩니다.
 Codex와 Claude Code는 루트 plugin artifact를 설치합니다:
 
 ```bash
-codex plugin marketplace add cluxion-local /path/to/cluxion-Agentplugin-supercoder
-codex plugin add cluxion-agentplugin-supercoder@cluxion-local
+codex plugin marketplace add cluxion-local /path/to/clx-supercoder
+codex plugin add clx-supercoder@cluxion-local
 ```
 
 ## 라이선스
@@ -77,7 +77,7 @@ Apache-2.0
 
 ============ English ==========
 
-# cluxion-agentplugin-supercoder
+# clx-supercoder
 
 A coding plugin for AI agents (Hermes Agent, Claude Code, Codex). It helps the model — even
 a smaller local one — edit code safely and accurately: every patch is checked against the
@@ -143,8 +143,8 @@ Filter with `/super` · uses `deliver=agent` so the harness directive becomes th
 Codex and Claude Code install from the root plugin artifact:
 
 ```bash
-codex plugin marketplace add cluxion-local /path/to/cluxion-Agentplugin-supercoder
-codex plugin add cluxion-agentplugin-supercoder@cluxion-local
+codex plugin marketplace add cluxion-local /path/to/clx-supercoder
+codex plugin add clx-supercoder@cluxion-local
 ```
 
 ## License

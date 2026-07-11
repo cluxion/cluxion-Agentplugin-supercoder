@@ -8,8 +8,8 @@ entry point. Every surface calls the same `cluxion-supercoder` JSON contracts.
 Codex uses the root marketplace artifact:
 
 ```bash
-codex plugin marketplace add cluxion-local /path/to/cluxion-Agentplugin-supercoder
-codex plugin add cluxion-agentplugin-supercoder@cluxion-local
+codex plugin marketplace add cluxion-local /path/to/clx-supercoder
+codex plugin add clx-supercoder@cluxion-local
 ```
 
 Files:

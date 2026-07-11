@@ -1,6 +1,6 @@
 # Documentation
 
-`cluxion-Agentplugin-supercoder` 공개 문서입니다.
+`clx-supercoder` 공개 문서입니다.
 
 ## 처음 읽는 분
 
