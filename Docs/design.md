@@ -31,9 +31,9 @@ LineWindow
 | 위치 탐색 | 120 lines / file |
 | patch context | ~100 lines |
 | 리뷰 | 160 lines |
-| 생성 파일 soft cap | 400 lines |
+| 생성 파일 planning soft cap | 400 lines (`create_file`) |
 
-초과 시 `line_budget_exceeded` — split plan 또는 차단.
+초과 시 `line_budget_exceeded` — split plan 또는 차단. 400-line 값은 **planning soft cap**이며, public `supercoder_patch`가 replacement 길이를 자동으로 세어 차단하지는 않는다.
 
 ## Safe patch
 
@@ -42,13 +42,14 @@ hash/fuzzy match 로직:
 1. exact match
 2. fuzzy match (threshold 0.86, ambiguous 시 거부)
 3. stale file hash → block
+4. missing/empty `expected_file_hash` / `expected_hash` → reject before mutation
 
 ## Safety (fail-closed)
 
 - workspace root 밖 path 차단
 - destructive command 차단
 - secret 경로 패턴 read/write 차단
-- 400줄 초과 single write 차단
+- 내부 게이트: caller가 명시적으로 `line_count` > 400을 넘긴 `write_file`/`patch`만 차단 (public patch의 replacement 길이 자동 차단 아님)
 
 ## Evidence contract
 

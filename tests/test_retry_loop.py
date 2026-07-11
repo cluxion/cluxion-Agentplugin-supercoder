@@ -90,9 +90,16 @@ def test_unwritable_state_dir_falls_back_to_memory(monkeypatch, tmp_path: Path) 
 def test_escalation_survives_one_shot_cli_processes(tmp_path: Path) -> None:
     """The documented contract: each `patch` call is a fresh CLI process, and
     the third identical failure must still surface escalate=true."""
-    (tmp_path / "mod.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    original = "def f():\n    return 1\n"
+    (tmp_path / "mod.py").write_text(original, encoding="utf-8")
     payload = json.dumps(
-        {"cwd": str(tmp_path), "path": "mod.py", "old_text": "not in the file", "new_text": "whatever"}
+        {
+            "cwd": str(tmp_path),
+            "path": "mod.py",
+            "old_text": "not in the file",
+            "new_text": "whatever",
+            "expected_file_hash": file_hash(original),
+        }
     )
     env = {
         **os.environ,
@@ -116,12 +123,14 @@ def test_escalation_survives_one_shot_cli_processes(tmp_path: Path) -> None:
 
 
 def test_patch_failure_carries_retry_advice(tmp_path: Path) -> None:
-    (tmp_path / "mod.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    original = "def f():\n    return 1\n"
+    (tmp_path / "mod.py").write_text(original, encoding="utf-8")
     payload = {
         "cwd": str(tmp_path),
         "path": "mod.py",
         "old_text": "not in the file",
         "new_text": "whatever",
+        "expected_file_hash": file_hash(original),
     }
     first = runner.patch_tool(payload)
     assert first.ok is False
@@ -219,6 +228,7 @@ def test_syntax_revert_counts_as_attempt_and_success_clears(tmp_path: Path) -> N
             "path": "mod.py",
             "old_text": "return a + b",
             "new_text": "return a +",
+            "expected_file_hash": file_hash(original),
         }
     )
     assert broken.payload["strategy"] == "syntax_reverted"

@@ -62,6 +62,10 @@ PATCH_SCHEMA = {
             "cwd": {"type": "string"},
         },
         "required": ["path", "old_text", "new_text"],
+        "anyOf": [
+            {"required": ["expected_file_hash"]},
+            {"required": ["expected_hash"]},
+        ],
     },
 }
 

@@ -137,12 +137,18 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
         return ToolResult(False, {"error": gate.reason})
     target = root / rel
     old_text = str(payload.get("old_text", ""))
+    expected_file_hash = _expected_hash_from(payload)
+    if not expected_file_hash:
+        return _invalid(
+            "expected_file_hash or expected_hash is required",
+            "Pass the file_hash from read_window as expected_file_hash or expected_hash.",
+        )
     try:
         result = apply_patch(
             target,
             old_text=old_text,
             new_text=str(payload.get("new_text", "")),
-            expected_file_hash=_expected_hash_from(payload),
+            expected_file_hash=expected_file_hash,
         )
     except UnicodeDecodeError as exc:
         return ToolResult(False, {"error": f"file is not valid UTF-8: {exc}"})
@@ -311,8 +317,19 @@ __all__ = [
 ]
 
 
-def _expected_hash_from(payload: dict[str, object]) -> str:
+def _expected_hash_from(payload: Mapping[str, object]) -> str:
     """Accept both spellings: input docs used expected_file_hash while the
     result object says expected_hash, and hosts mirroring the output name
-    silently lost stale-write protection."""
-    return str(payload.get("expected_hash") or payload.get("expected_file_hash") or "")
+    silently lost stale-write protection.
+
+    Empty or whitespace-only values are treated as missing so patch_tool can
+    reject before mutation when neither alias supplies a real hash.
+    """
+    for key in ("expected_hash", "expected_file_hash"):
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if value:
+            return value
+    return ""
