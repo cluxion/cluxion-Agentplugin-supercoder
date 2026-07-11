@@ -31,4 +31,4 @@ Supercoder가 **현재 제공하는** 기능입니다.
 ## 의도적으로 포함하지 않음
 
 - Provider/OAuth/모델 선택 (host 소유)
-- 전처리·일반 큐 ([preprocessing](https://github.com/cluxion/cluxion-Agentplugin-preprocessing) 플러그인)
+- 전처리·일반 큐 ([preprocessing](https://github.com/cluxion/clx-preprocessing) 플러그인)
