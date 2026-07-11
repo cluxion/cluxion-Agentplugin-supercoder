@@ -128,7 +128,10 @@ def _write(path: Path, text: str) -> str:
 
 def test_patch_reverts_on_broken_syntax(tmp_path: Path, backend: str) -> None:
     original = "def add(a, b):\n    return a + b\n"
-    digest = _write(tmp_path / "mod.py", original)
+    path = tmp_path / "mod.py"
+    digest = _write(path, original)
+    before_bytes = path.read_bytes()
+    before_mtime = path.stat().st_mtime_ns
     result = runner.patch_tool(
         {
             "cwd": str(tmp_path),
@@ -139,9 +142,13 @@ def test_patch_reverts_on_broken_syntax(tmp_path: Path, backend: str) -> None:
         }
     )
     assert result.ok is False
-    assert result.payload["strategy"] == "syntax_reverted"
+    assert result.payload["strategy"] == "syntax_rejected"
     assert result.payload["syntax_errors"]
-    assert (tmp_path / "mod.py").read_text(encoding="utf-8") == original
+    assert path.read_text(encoding="utf-8") == original
+    # Pre-commit gate: invalid candidate must not touch disk (no write/revert window).
+    assert path.read_bytes() == before_bytes
+    assert path.stat().st_mtime_ns == before_mtime
+    assert file_hash(path.read_text(encoding="utf-8")) == digest
 
 
 def test_syntax_revert_preserves_crlf_bytes(tmp_path: Path, backend: str) -> None:
@@ -160,15 +167,24 @@ def test_syntax_revert_preserves_crlf_bytes(tmp_path: Path, backend: str) -> Non
     )
 
     assert result.ok is False
-    assert result.payload["strategy"] == "syntax_reverted"
+    assert result.payload["strategy"] == "syntax_rejected"
     assert path.read_bytes() == original
 
 
 def test_syntax_revert_refuses_concurrent_change(tmp_path: Path, monkeypatch) -> None:
+    """External writer during post-check still uses hash-guarded revert_if_unchanged."""
     path = tmp_path / "mod.py"
     original = "def add(a, b):\n    return a + b\n"
     concurrent = b"def concurrent():\n    return 2\n"
     path.write_text(original, encoding="utf-8")
+    # Force a successful commit of invalid syntax (no pre-validator) so the
+    # post-check/concurrency path remains covered for unexpected gaps.
+    from cluxion_agentplugin_supercoder.core.hash_patch import apply_patch as real_apply_patch
+
+    def apply_without_validator(*args, **kwargs):
+        kwargs.pop("candidate_validator", None)
+        return real_apply_patch(*args, **kwargs)
+
     check_source = syntax_gate.check_source
 
     def write_concurrently(*args, **kwargs):
@@ -176,6 +192,7 @@ def test_syntax_revert_refuses_concurrent_change(tmp_path: Path, monkeypatch) ->
         path.write_bytes(concurrent)
         return check
 
+    monkeypatch.setattr(runner, "apply_patch", apply_without_validator)
     monkeypatch.setattr(syntax_gate, "check_source", write_concurrently)
     result = runner.patch_tool(
         {
@@ -190,6 +207,41 @@ def test_syntax_revert_refuses_concurrent_change(tmp_path: Path, monkeypatch) ->
     assert result.ok is False
     assert result.payload["strategy"] == "revert_failed"
     assert path.read_bytes() == concurrent
+
+
+def test_invalid_syntax_never_calls_atomic_write(tmp_path: Path, monkeypatch) -> None:
+    """Runner + syntax gate: invalid candidate is rejected before any disk write."""
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    path = tmp_path / "mod.py"
+    original = "def add(a, b):\n    return a + b\n"
+    path.write_text(original, encoding="utf-8")
+    before_bytes = path.read_bytes()
+    before_mtime = path.stat().st_mtime_ns
+    digest = file_hash(original)
+    writes = {"count": 0}
+    real_atomic = hp._atomic_write
+
+    def counting_atomic(p: Path, content: str) -> None:
+        writes["count"] += 1
+        return real_atomic(p, content)
+
+    monkeypatch.setattr(hp, "_atomic_write", counting_atomic)
+    result = runner.patch_tool(
+        {
+            "cwd": str(tmp_path),
+            "path": "mod.py",
+            "old_text": "    return a + b\n",
+            "new_text": "    return a +\n",
+            "expected_file_hash": digest,
+        }
+    )
+    assert result.ok is False
+    assert result.payload["strategy"] == "syntax_rejected"
+    assert result.payload["syntax_errors"]
+    assert writes["count"] == 0
+    assert path.read_bytes() == before_bytes
+    assert path.stat().st_mtime_ns == before_mtime
 
 
 def test_patch_passes_gate_when_valid(tmp_path: Path, backend: str) -> None:
@@ -273,12 +325,12 @@ def test_malformed_native_schema_still_reverts_invalid_patch(tmp_path: Path, mon
         }
     )
     assert result.ok is False
-    assert result.payload["strategy"] == "syntax_reverted"
+    assert result.payload["strategy"] == "syntax_rejected"
     assert (tmp_path / "mod.py").read_text(encoding="utf-8") == original
 
 
 def test_syntax_verdict_uses_post_image_not_later_writer(tmp_path: Path, monkeypatch) -> None:
-    """Concurrent writer must not rewrite this patch's syntax verdict."""
+    """Verdict uses candidate text; disk mutation during check must not rewrite it."""
     path = tmp_path / "mod.py"
     original = "def add(a, b):\n    return a + b\n"
     later_writer = "def later():\n    return 99\n"
@@ -304,11 +356,11 @@ def test_syntax_verdict_uses_post_image_not_later_writer(tmp_path: Path, monkeyp
         }
     )
     assert result.ok is False
-    assert result.payload["strategy"] == "revert_failed"
+    # Pre-commit reject: no patch write, so no hash-guarded revert path.
+    assert result.payload["strategy"] == "stale_file"
     assert path.read_text(encoding="utf-8") == later_writer
-    assert result.payload["syntax"]["valid"] is False
-    assert result.payload["syntax_errors"]
-    # Path may select language, but content must be the committed post-image.
+    assert "syntax" not in result.payload
+    # Path may select language, but content must be the candidate post-image.
     kwargs = seen.get("kwargs") or {}
     assert "content" in kwargs
     assert kwargs["content"] == "def add(a, b):\n    return a +\n"

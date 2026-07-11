@@ -143,12 +143,22 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
             "expected_file_hash or expected_hash is required",
             "Pass the file_hash from read_window as expected_file_hash or expected_hash.",
         )
+    syntax_enabled = bool(payload.get("syntax_gate", True))
+    precheck: dict[str, object] | None = None
+
+    def _candidate_ok(candidate: str) -> bool:
+        """In-memory syntax check on candidate text; no disk mutation."""
+        nonlocal precheck
+        precheck = syntax_gate.check_source(path=target, content=candidate)
+        return not (precheck["checked"] and not precheck["valid"])
+
     try:
         result = apply_patch(
             target,
             old_text=old_text,
             new_text=str(payload.get("new_text", "")),
             expected_file_hash=expected_file_hash,
+            candidate_validator=_candidate_ok if syntax_enabled else None,
         )
     except UnicodeDecodeError as exc:
         return ToolResult(False, {"error": f"file is not valid UTF-8: {exc}"})
@@ -162,14 +172,26 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
         "matched_hash": result.matched_hash,
         "similarity": result.similarity,
     }
-    if result.success and bool(payload.get("syntax_gate", True)):
-        # Verdict must use this patch's exact post-image; path only selects language.
-        # Disk may already differ if a concurrent writer landed between commit and gate.
-        check = syntax_gate.check_source(path=target, content=result._post_image)
+    # Pre-commit reject: structured syntax failure without ever writing disk.
+    if not result.success and result.strategy == "candidate_rejected" and precheck is not None:
+        body["strategy"] = "syntax_rejected"
+        body["message"] = "patch rejected before write: result does not parse"
+        body["syntax"] = {key: precheck[key] for key in ("checked", "language", "valid", "error_count")}
+        body["syntax_errors"] = precheck["errors"]
+        advice = retry_loop.record_failure(str(root), rel, "syntax_rejected", old_text=old_text)
+        body["retry"] = advice.to_payload()
+        return ToolResult(False, body)
+    if result.success and syntax_enabled:
+        # Prefer the pre-commit verdict; fall back to post-image check only when
+        # the validator path was skipped (unexpected / concurrency coverage).
+        check = (
+            precheck
+            if precheck is not None
+            else syntax_gate.check_source(path=target, content=result._post_image)
+        )
         body["syntax"] = {key: check[key] for key in ("checked", "language", "valid", "error_count")}
         if check["checked"] and not check["valid"]:
-            # L1 gate: the patch broke the file's syntax. Roll the file back
-            # and surface the parse errors so the host model can retry.
+            # Unexpected post-commit invalid: hash-guarded revert only.
             reverted = revert_if_unchanged(target, result.pre_image_raw, result.post_hash)
             strategy = "syntax_reverted" if reverted else "revert_failed"
             body["strategy"] = strategy

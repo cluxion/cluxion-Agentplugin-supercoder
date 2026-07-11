@@ -231,7 +231,7 @@ def test_syntax_revert_counts_as_attempt_and_success_clears(tmp_path: Path) -> N
             "expected_file_hash": file_hash(original),
         }
     )
-    assert broken.payload["strategy"] == "syntax_reverted"
+    assert broken.payload["strategy"] == "syntax_rejected"
     assert broken.payload["retry"]["attempt"] == 1
     assert "syntax_errors" in broken.payload["retry"]["guidance"]
     fixed = runner.patch_tool(

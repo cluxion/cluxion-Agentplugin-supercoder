@@ -7,6 +7,7 @@ import os
 import stat
 import tempfile
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -180,6 +181,7 @@ def apply_patch(
     new_text: str,
     expected_file_hash: str = "",
     fuzzy_threshold: float = DEFAULT_FUZZY_THRESHOLD,
+    candidate_validator: Callable[[str], bool] | None = None,
 ) -> PatchResult:
     if not old_text:
         return _failed(str(path), "empty_old_text", expected_file_hash, "old_text must be non-empty")
@@ -224,6 +226,7 @@ def apply_patch(
                 1.0,
                 eol=eol,
                 pre_image_raw=raw,
+                candidate_validator=candidate_validator,
             )
         fuzzy = _fuzzy_span(text, old_text)
         if fuzzy and fuzzy[3] >= fuzzy_threshold and not fuzzy[4]:
@@ -239,6 +242,7 @@ def apply_patch(
                 fuzzy[3],
                 eol=eol,
                 pre_image_raw=raw,
+                candidate_validator=candidate_validator,
             )
         return _failed(str(path), "no_match", expected_file_hash or current_hash, "patch target not found")
 
@@ -369,18 +373,31 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    """Atomic replace via temp in same dir + fsync to prevent corruption on crash."""
+    """Atomic replace via temp in same dir + fsync to prevent corruption on crash.
+
+    On write/fsync/replace failure, unlink the uncommitted temp (ignore
+    FileNotFoundError). Successful replace marks committed so the temp is not
+    removed — it has become the destination path.
+    """
     dir_ = path.parent
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", newline="", dir=dir_, delete=False, suffix=".tmp"
-    ) as tmp:
-        tmp.write(content)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_path = Path(tmp.name)
-    with suppress(OSError):
-        os.chmod(tmp_path, os.stat(path).st_mode & 0o777)
-    os.replace(tmp_path, path)
+    tmp_path: Path | None = None
+    committed = False
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="", dir=dir_, delete=False, suffix=".tmp"
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(content)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        with suppress(OSError):
+            os.chmod(tmp_path, os.stat(path).st_mode & 0o777)
+        os.replace(tmp_path, path)
+        committed = True
+    finally:
+        if tmp_path is not None and not committed:
+            with suppress(OSError):
+                tmp_path.unlink()
 
 
 def revert_if_unchanged(path: Path, pre_image_raw: str, expected_post_hash: str) -> bool:
@@ -409,6 +426,7 @@ def _commit(
     *,
     eol: str = "\n",
     pre_image_raw: str,
+    candidate_validator: Callable[[str], bool] | None = None,
 ) -> PatchResult:
     # Re-check under the held exclusive lock: a TOCTOU swap to a symlink must
     # not let _atomic_write follow the link and clobber an external target.
@@ -418,6 +436,28 @@ def _commit(
     updated = f"{text[:start]}{new_content}{text[end:]}"
     if eol != "\n":
         updated = updated.replace("\n", eol)
+    # Optional pre-commit gate: inspect candidate text under the same lock,
+    # before any disk mutation. Reject without writing when validator returns False.
+    if candidate_validator is not None:
+        candidate_ok = candidate_validator(updated)
+        blocked = _symlink_patch_block(path, expected)
+        if blocked is not None:
+            return blocked
+        try:
+            with path.open(encoding="utf-8", newline="") as source:
+                current_raw = source.read()
+        except (FileNotFoundError, UnicodeDecodeError):
+            return _failed(str(path), "stale_file", expected, "file changed during candidate validation")
+        if current_raw != pre_image_raw:
+            return _failed(str(path), "stale_file", expected, "file changed during candidate validation")
+        if not candidate_ok:
+            return _failed(
+                str(path),
+                "candidate_rejected",
+                expected,
+                "candidate rejected by pre-commit validator",
+                score=score,
+            )
     _atomic_write(path, updated)
     return PatchResult(
         True,

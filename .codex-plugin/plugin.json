@@ -1,6 +1,6 @@
 {
   "name": "cluxion-agentplugin-supercoder",
-  "version": "0.2.47",
+  "version": "0.2.48",
   "description": "Universal agent coding harness plugin: cursor logic, safe patch, line budget, Rust index, and test gates.",
   "author": {
     "name": "cluxion"

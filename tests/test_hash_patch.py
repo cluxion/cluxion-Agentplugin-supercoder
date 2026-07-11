@@ -650,3 +650,196 @@ def test_atomic_write_interruption_leaves_original_intact(tmp_path: Path) -> Non
         # cleanup any leftover temp if test created
         for f in tmp_path.glob("*.tmp"):
             f.unlink(missing_ok=True)
+
+
+# === Cycle 108: pre-commit candidate validator + temp cleanup ===
+
+
+def test_invalid_candidate_validator_skips_atomic_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rejecting validator must run under lock, never call _atomic_write, leave disk frozen."""
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    path = tmp_path / "a.py"
+    original = "alpha\nbeta\ngamma\n"
+    path.write_text(original, encoding="utf-8")
+    before_bytes = path.read_bytes()
+    before_hash = file_hash(original)
+    before_mtime = path.stat().st_mtime_ns
+    seen: list[str] = []
+    writes = {"count": 0}
+
+    def reject(candidate: str) -> bool:
+        seen.append(candidate)
+        return False
+
+    def boom_write(p: Path, content: str) -> None:
+        writes["count"] += 1
+        raise AssertionError("_atomic_write must not run for invalid candidate")
+
+    monkeypatch.setattr(hp, "_atomic_write", boom_write)
+    result = apply_patch(
+        path,
+        old_text="beta\n",
+        new_text="BETA\n",
+        expected_file_hash=before_hash,
+        candidate_validator=reject,
+    )
+    assert result.success is False
+    assert result.strategy == "candidate_rejected"
+    assert "pre-commit validator" in result.message
+    assert writes["count"] == 0
+    assert seen == ["alpha\nBETA\ngamma\n"]
+    assert path.read_bytes() == before_bytes
+    assert file_hash(path.read_text(encoding="utf-8")) == before_hash
+    assert path.stat().st_mtime_ns == before_mtime
+
+
+def test_valid_candidate_validator_allows_commit(tmp_path: Path) -> None:
+    path = tmp_path / "a.py"
+    path.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    seen: list[str] = []
+
+    def accept(candidate: str) -> bool:
+        seen.append(candidate)
+        return True
+
+    result = apply_patch(
+        path,
+        old_text="beta\n",
+        new_text="BETA\n",
+        expected_file_hash=file_hash("alpha\nbeta\ngamma\n"),
+        candidate_validator=accept,
+    )
+    assert result.success is True
+    assert result.strategy == "exact"
+    assert seen == ["alpha\nBETA\ngamma\n"]
+    assert path.read_text(encoding="utf-8") == "alpha\nBETA\ngamma\n"
+
+
+def test_disabled_validator_none_stays_compatible(tmp_path: Path) -> None:
+    path = tmp_path / "a.py"
+    path.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    result = apply_patch(
+        path,
+        old_text="beta\n",
+        new_text="BETA\n",
+        expected_file_hash=file_hash("alpha\nbeta\ngamma\n"),
+        candidate_validator=None,
+    )
+    assert result.success is True
+    assert path.read_text(encoding="utf-8") == "alpha\nBETA\ngamma\n"
+
+
+def test_candidate_validator_runs_while_hash_lock_held(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Validator must execute inside the same exclusive lock as the patch decision."""
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    path = tmp_path / "a.py"
+    path.write_text("alpha\nbeta\n", encoding="utf-8")
+    states: list[str] = []
+    real_lock = hp._exclusive_lock
+
+    @contextlib.contextmanager
+    def tracking_lock(p: Path):
+        states.append("enter")
+        with real_lock(p):
+            states.append("held")
+            try:
+                yield
+            finally:
+                states.append("release")
+
+    def validator(candidate: str) -> bool:
+        assert "held" in states and "release" not in states
+        states.append("validate")
+        return True
+
+    monkeypatch.setattr(hp, "_exclusive_lock", tracking_lock)
+    result = apply_patch(
+        path,
+        old_text="beta\n",
+        new_text="BETA\n",
+        expected_file_hash=file_hash("alpha\nbeta\n"),
+        candidate_validator=validator,
+    )
+    assert result.success is True
+    assert states == ["enter", "held", "validate", "release"]
+
+
+@pytest.mark.parametrize(
+    "fail_point",
+    ["write", "fsync", "replace"],
+    ids=["write", "fsync", "replace"],
+)
+def test_atomic_write_error_cleans_tmp_and_keeps_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_point: str
+) -> None:
+    """write/fsync/replace failures must unlink uncommitted *.tmp and leave original intact."""
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    path = tmp_path / "keep.txt"
+    original = "IMPORTANT ORIGINAL\n"
+    path.write_text(original, encoding="utf-8")
+    before = path.read_bytes()
+    before_mtime = path.stat().st_mtime_ns
+
+    created: list[Path] = []
+    real_ntf = tempfile.NamedTemporaryFile
+
+    def tracking_ntf(*args, **kwargs):
+        tmp = real_ntf(*args, **kwargs)
+        created.append(Path(tmp.name))
+        if fail_point == "write":
+            original_write = tmp.write
+
+            def boom_write(data):
+                original_write(data)
+                raise OSError("injected write failure")
+
+            tmp.write = boom_write  # type: ignore[method-assign]
+        return tmp
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", tracking_ntf)
+    if fail_point == "fsync":
+
+        def boom_fsync(fd):
+            raise OSError("injected fsync failure")
+
+        monkeypatch.setattr(hp.os, "fsync", boom_fsync)
+    elif fail_point == "replace":
+
+        def boom_replace(src, dst):
+            raise OSError("injected replace failure")
+
+        monkeypatch.setattr(hp.os, "replace", boom_replace)
+
+    with pytest.raises(OSError):
+        hp._atomic_write(path, "NEW CONTENT THAT MUST NOT LAND\n")
+
+    assert path.read_bytes() == before
+    assert path.stat().st_mtime_ns == before_mtime
+    leftovers = list(tmp_path.glob("*.tmp"))
+    assert leftovers == [], f"uncommitted temp left behind: {leftovers}"
+    for item in created:
+        assert not item.exists(), f"temp still present: {item}"
+
+
+def test_atomic_write_cleanup_error_does_not_hide_root_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    path = tmp_path / "keep.txt"
+    path.write_text("original\n", encoding="utf-8")
+
+    def fail_fsync(_fd: int) -> None:
+        raise OSError("fsync root cause")
+
+    def fail_cleanup(_path: Path) -> None:
+        raise PermissionError("cleanup denied")
+
+    monkeypatch.setattr(hp.os, "fsync", fail_fsync)
+    monkeypatch.setattr(Path, "unlink", fail_cleanup)
+
+    with pytest.raises(OSError, match="fsync root cause"):
+        hp._atomic_write(path, "new\n")

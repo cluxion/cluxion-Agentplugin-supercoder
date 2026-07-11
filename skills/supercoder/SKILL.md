@@ -110,7 +110,8 @@ A failed `patch` returns `ok:false` with a `strategy` and a `retry` object
 
 - `no_match` — `old_text` not found, or several fuzzy candidates scored too close to pick one (ambiguity refusal). Re-read the window and copy `old_text` exactly; widen it with surrounding lines to disambiguate.
 - `stale_file` — the file changed after `read-window`; rebuild the cursor and use the fresh `file_hash`.
-- `syntax_reverted` — the patch applied but broke parsing, so the file was restored to its pre-patch content; fix `new_text` using the returned `syntax_errors`.
+- `syntax_rejected` — the candidate failed parsing and was rejected before any file write; fix `new_text` using the returned `syntax_errors`.
+- `syntax_reverted` — an unexpected post-write check failed and the file was restored to its pre-patch content.
 - `missing_file` / `empty_old_text` — verify the path (`cursor-map`) / send non-empty `old_text`.
 
 Follow `retry.guidance`; never resend a failed patch unchanged. Retry state is persisted per workspace+file (15-minute TTL, cleared on success), so the attempt budget accumulates across one-shot CLI calls. When `escalate` is true the retry budget (3) is exhausted — stop patching and re-plan a smaller edit.

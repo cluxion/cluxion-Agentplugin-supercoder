@@ -49,6 +49,10 @@ _GUIDANCE = {
         "syntax_errors for the exact line, then fix brackets/indentation in "
         "new_text before retrying."
     ),
+    "syntax_rejected": (
+        "The patch was rejected before writing because the candidate did not parse. Check "
+        "syntax_errors for the exact line, then fix brackets/indentation in new_text before retrying."
+    ),
     "missing_file": ("The target file does not exist. Verify the path against supercoder_cursor_map before retrying."),
 }
 _REPEAT_GUIDANCE = (
