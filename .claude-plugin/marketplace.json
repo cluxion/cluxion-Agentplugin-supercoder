@@ -8,7 +8,7 @@
     {
       "name": "cluxion-agentplugin-supercoder",
       "description": "Deterministic coding harness for host agents: plan, read-window, patch, gates, brief.",
-      "version": "0.2.48",
+      "version": "0.2.49",
       "source": "./"
     }
   ]

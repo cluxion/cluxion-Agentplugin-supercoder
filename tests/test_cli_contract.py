@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -107,6 +110,36 @@ def test_cli_reports_invalid_utf8_stdin(monkeypatch, capsys, command) -> None:
     assert payload["error"] == "invalid_json"
     assert "not valid UTF-8" in payload["message"]
     assert payload["hint"]
+
+
+def test_cli_rejects_raw_invalid_utf8_bytes_before_plan(tmp_path) -> None:
+    """Real CLI entrypoint: raw invalid UTF-8 on --json-stdin → invalid_json; plan never runs.
+
+    Python text stdin often uses surrogateescape, so sys.stdin.read() succeeds on bad
+    bytes and a JSON-shaped payload would otherwise reach plan/downstream work.
+    """
+    # JSON-shaped body with one non-UTF-8 byte; loose decode would invoke plan (coding_queue).
+    body = b'{"prompt":"fix tests\xff","cwd":"' + str(tmp_path).encode("ascii") + b'"}'
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")
+        + os.pathsep
+        + os.environ.get("PYTHONPATH", ""),
+    }
+    proc = subprocess.run(
+        [sys.executable, "-m", "cluxion_agentplugin_supercoder.cli", "plan", "--json-stdin"],
+        input=body,
+        capture_output=True,
+        env=env,
+        timeout=30,
+    )
+    assert proc.returncode != 0, proc.stdout
+    payload = json.loads(proc.stdout.decode("utf-8"))
+    assert payload["ok"] is False
+    assert payload["error"] == "invalid_json"
+    # plan / downstream must not have run (would emit mode / units without error)
+    assert "mode" not in payload
+    assert "units" not in payload
 
 
 def test_check_fails_for_forced_missing_subprocess_backend(monkeypatch, capsys) -> None:

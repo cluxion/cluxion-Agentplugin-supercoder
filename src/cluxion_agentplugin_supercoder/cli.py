@@ -130,11 +130,14 @@ def _run_json_command(command: str, json_stdin: bool) -> int:
         return 2
     try:
         raw = sys.stdin.read()
+        # Text stdin may use surrogateescape: read() succeeds on invalid bytes.
+        # Reject any text that is not strictly UTF-8 encodable before json.loads.
+        raw.encode("utf-8")
         payload = json.loads(raw or "{}")
     except json.JSONDecodeError as exc:
         print(_json_error("invalid_json", f"invalid JSON stdin: {exc.msg}", "Pass a JSON object on stdin."))
         return 2
-    except UnicodeDecodeError:
+    except (UnicodeDecodeError, UnicodeEncodeError):
         print(_json_error("invalid_json", "invalid JSON stdin: not valid UTF-8", "Pass UTF-8 encoded JSON on stdin."))
         return 2
     except RecursionError:
