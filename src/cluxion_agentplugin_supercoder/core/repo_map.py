@@ -11,11 +11,13 @@ tree-sitter tiers add rust/js/ts/tsx.
 from __future__ import annotations
 
 import ast
+import subprocess
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 from cluxion_agentplugin_supercoder import rust_bridge
+from cluxion_agentplugin_supercoder.core.hash_patch import file_hash as content_file_hash
 from cluxion_agentplugin_supercoder.core.syntax_gate import language_for_path
 
 DEFAULT_MAX_FILES = 128
@@ -131,10 +133,15 @@ def _outline_for_map_entry(
     if cached is not None:
         _outline_cache.move_to_end(key)
         return cached, True
-    symbols = outline_file(path, language=language)
-    _outline_cache[key] = symbols
-    while len(_outline_cache) > _OUTLINE_CACHE_MAX:
-        _outline_cache.popitem(last=False)
+    result = _outline_file_result(path, language=language)
+    symbols = result.get("symbols")
+    symbols = symbols if isinstance(symbols, list) else []
+    # Cache only when the backend successfully parsed the same bytes the scan hashed.
+    # No hash / mismatch / checked=false (incl. python-tier [] for rust) never poison the cache.
+    if result.get("checked") is True and result.get("content_hash") == file_hash:
+        _outline_cache[key] = symbols
+        while len(_outline_cache) > _OUTLINE_CACHE_MAX:
+            _outline_cache.popitem(last=False)
     return symbols, False
 
 
@@ -162,9 +169,16 @@ def _rank_group(rel: str) -> int:
 
 def outline_file(path: Path, *, language: str | None = None) -> list[dict[str, Any]]:
     """Outline one file's top-level symbols via the backend chain (fail-open)."""
+    result = _outline_file_result(path, language=language)
+    symbols = result.get("symbols")
+    return symbols if isinstance(symbols, list) else []
+
+
+def _outline_file_result(path: Path, *, language: str | None = None) -> dict[str, Any]:
+    """Internal outline helper: full backend payload including content_hash."""
     resolved = language or language_for_path(path) or ""
     if resolved not in OUTLINE_LANGUAGES:
-        return []
+        return {"ok": True, "checked": False, "language": resolved, "reason": "no_outline", "symbols": []}
     backend = rust_bridge.resolve_backend()
     payload = {"path": str(path), "language": resolved}
     try:
@@ -174,10 +188,10 @@ def outline_file(path: Path, *, language: str | None = None) -> list[dict[str, A
             result = rust_bridge._invoke_subprocess("outline", payload)
         else:
             result = _py_outline(path, resolved)
-    except (RuntimeError, OSError):
-        return []
-    symbols = result.get("symbols")
-    return symbols if isinstance(symbols, list) else []
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        # Documented fallback: backend faults use the Python tier rather than [].
+        result = _py_outline(path, resolved)
+    return result if isinstance(result, dict) else {"ok": True, "checked": False, "symbols": []}
 
 
 def _py_outline(path: Path, language: str) -> dict[str, Any]:
@@ -205,7 +219,13 @@ def _py_outline(path: Path, language: str) -> dict[str, Any]:
                 member_entry = _py_symbol(member, source_lines, depth=1)
                 if member_entry is not None:
                     symbols.append(member_entry)
-    return {"ok": True, "checked": True, "language": language, "symbols": symbols}
+    return {
+        "ok": True,
+        "checked": True,
+        "language": language,
+        "symbols": symbols,
+        "content_hash": content_file_hash(source),
+    }
 
 
 def _py_symbol(node: ast.stmt, source_lines: list[str], *, depth: int) -> dict[str, Any] | None:

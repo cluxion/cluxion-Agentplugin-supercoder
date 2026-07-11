@@ -101,3 +101,36 @@ def test_backend_parity(repo: Path) -> None:
     baseline = results["python"]
     for name, entries in results.items():
         assert entries == baseline, f"{name} diverges from python baseline"
+
+
+def test_subprocess_json_bridge_uses_utf8_encoding(monkeypatch) -> None:
+    """C/ASCII locale must not crash after a non-ASCII payload is already committed."""
+    captured: dict[str, object] = {}
+
+    class Completed:
+        returncode = 0
+        stdout = '{"ok": true, "matched": false}'
+        stderr = ""
+
+    def fake_run(*args, **kwargs):
+        captured.update(kwargs)
+        return Completed()
+
+    monkeypatch.setattr(rust_bridge, "resolve_backend", lambda: "subprocess")
+    monkeypatch.setattr(rust_bridge.shutil, "which", lambda _name: "/usr/bin/supercoder-index")
+    monkeypatch.setattr(rust_bridge.subprocess, "run", fake_run)
+    result = rust_bridge._invoke_subprocess("fuzzy_span", {"text": "한글\n", "reference": "한글\n"})
+    assert result["ok"] is True
+    assert captured.get("encoding") == "utf-8"
+    assert captured.get("text") is True
+
+
+def test_skip_named_root_matches_python_scan(tmp_path: Path, backend: str) -> None:
+    """Root basename in SKIP_DIRS (target/dist/.venv) must still be scanned."""
+    for name in ("target", "dist", ".venv"):
+        root = tmp_path / name
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+        (root / "b.py").write_text("y = 2\n", encoding="utf-8")
+        paths = [entry["path"] for entry in rust_bridge.scan_repo(root)]
+        assert paths == ["b.py", "src/a.py"], f"backend={backend} root={name}"

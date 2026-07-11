@@ -37,7 +37,10 @@ def read_window(
     if not path.is_relative_to(root.resolve()):
         raise PermissionError("workspace escape blocked")
     text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
+    # Split only on LF so U+2028/U+2029/NEL/form-feed stay inside the window
+    # (str.splitlines would rewrite them and break exact old_text matching).
+    # Empty file: zero lines; non-empty: count("\n")+1 EOF line-count semantics.
+    lines = text.split("\n") if text else []
     start = max(1, start_line)
     end = min(len(lines), start + max_lines - 1)
     if start > len(lines):

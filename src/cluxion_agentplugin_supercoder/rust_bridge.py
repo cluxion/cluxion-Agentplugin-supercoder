@@ -216,6 +216,7 @@ def _invoke_subprocess(command: str, payload: dict[str, object]) -> dict[str, ob
         [binary, command],
         input=json.dumps(payload, ensure_ascii=False),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
         timeout=30.0,

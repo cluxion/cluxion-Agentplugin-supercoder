@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import tempfile
 import threading
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -26,32 +27,124 @@ MAX_LINE_DRIFT = 2
 _thread_fallback_lock = threading.Lock()
 
 
+def _lock_dir() -> Path:
+    # UID-scoped so a shared /tmp entry cannot collide across users (mode 0700).
+    return Path(tempfile.gettempdir()) / f"cluxion-supercoder-locks-{os.geteuid()}"
+
+
 def _lock_path(path: Path) -> Path:
     # Same absolute target path -> same lock file, but outside the user tree:
     # patch runs used to leave .<name>.cluxion-lock litter in the workspace.
     digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:32]
-    lock_dir = Path(tempfile.gettempdir()) / "cluxion-supercoder-locks"
-    lock_dir.mkdir(mode=0o700, exist_ok=True)
-    return lock_dir / f"{digest}.lock"
+    return _lock_dir() / f"{digest}.lock"
+
+
+def _dir_open_flags() -> int | None:
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if not all(hasattr(os, name) for name in required):
+        return None
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _file_open_flags(create: bool) -> int | None:
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_CLOEXEC"):
+        return None
+    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC
+    if create:
+        flags |= os.O_CREAT
+    return flags
+
+
+def _dirfd_is_safe(dir_fd: int) -> bool:
+    try:
+        st = os.fstat(dir_fd)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    if st.st_uid != os.geteuid():
+        return False
+    return stat.S_IMODE(st.st_mode) == 0o700
+
+
+def _filefd_is_safe(fd: int) -> bool:
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        return False
+    if not stat.S_ISREG(st.st_mode):
+        return False
+    if st.st_uid != os.geteuid():
+        return False
+    return stat.S_IMODE(st.st_mode) == 0o600
+
+
+def _ensure_lock_dir() -> Path:
+    """Create the UID-scoped lock dir if missing; never chmod an existing path."""
+    lock_dir = _lock_dir()
+    try:
+        os.makedirs(lock_dir, mode=0o700, exist_ok=True)
+    except OSError:
+        # Concurrent creator may have won; only fail if the path is still missing.
+        if not lock_dir.is_dir():
+            raise
+    return lock_dir
 
 
 @contextmanager
 def _exclusive_lock(path: Path):
-    """Exclusive advisory lock on stable sidecar file (fcntl.flock). Graceful degrade on non-POSIX."""
+    """Exclusive advisory lock on a UID-scoped sidecar (fcntl.flock).
+
+    Thread fallback is only used when fcntl itself is unavailable. When fcntl
+    exists but race-honest directory/file open flags are missing, fail closed
+    rather than opening a path-level fd that cannot refuse symlinks. A POSIX
+    lock-dir/file that fails ownership/mode validation also raises rather than
+    silently dropping interprocess exclusion or chmod'ing another owner's path.
+    """
     if fcntl is None:
         with _thread_fallback_lock:
             yield
         return
-    lock_path = _lock_path(path)
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
+    dir_flags = _dir_open_flags()
+    file_flags = _file_open_flags(create=True)
+    if dir_flags is None or file_flags is None:
+        raise OSError("race-honest lock open flags unavailable (O_DIRECTORY/O_NOFOLLOW/O_CLOEXEC)")
+
+    digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:32]
+    basename = f"{digest}.lock"
+    # openat(O_CREAT) can spuriously ENOENT under heavy concurrent creators on
+    # some platforms; re-ensure the dir and retry without dropping flock exclusion.
+    last_err: OSError | None = None
+    for _ in range(5):
+        lock_dir = _ensure_lock_dir()
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            dir_fd = os.open(str(lock_dir), dir_flags)
+        except OSError as exc:
+            last_err = exc
+            continue
+        try:
+            if not _dirfd_is_safe(dir_fd):
+                raise OSError(f"unsafe lock directory: {lock_dir}")
+            try:
+                fd = os.open(basename, file_flags, 0o600, dir_fd=dir_fd)
+            except FileNotFoundError as exc:
+                last_err = exc
+                continue
+            try:
+                if not _filefd_is_safe(fd):
+                    raise OSError(f"unsafe lock file: {basename}")
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                return
+            finally:
+                os.close(fd)
         finally:
-            os.close(fd)
+            os.close(dir_fd)
+    assert last_err is not None
+    raise last_err
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +159,8 @@ class PatchResult:
     replacements: int = 0
     pre_image_raw: str = ""
     post_hash: str = ""
+    # Private/non-repr: exact bytes committed by _commit for syntax verdicts only.
+    _post_image: str = field(default="", repr=False, compare=False)
 
 
 def file_hash(content: str) -> str:
@@ -228,7 +323,13 @@ def _fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, bool] 
                 return None
             start = native["start"]
             end = native["end"]
-            return int(start), int(end), text[int(start) : int(end)], float(native["score"]), native["ambiguous"] is True
+            return (
+                int(start),
+                int(end),
+                text[int(start) : int(end)],
+                float(native["score"]),
+                native["ambiguous"] is True,
+            )
     return _best_fuzzy_span(text, reference)
 
 
@@ -270,7 +371,9 @@ def _best_fuzzy_span(text: str, reference: str) -> tuple[int, int, str, float, b
 def _atomic_write(path: Path, content: str) -> None:
     """Atomic replace via temp in same dir + fsync to prevent corruption on crash."""
     dir_ = path.parent
-    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", dir=dir_, delete=False, suffix=".tmp") as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline="", dir=dir_, delete=False, suffix=".tmp"
+    ) as tmp:
         tmp.write(content)
         tmp.flush()
         os.fsync(tmp.fileno())
@@ -327,6 +430,7 @@ def _commit(
         1,
         pre_image_raw,
         file_hash(updated),
+        _post_image=updated,
     )
 
 

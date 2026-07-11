@@ -92,4 +92,30 @@ def test_read_window_tool_rejects_non_positive_bounds(tmp_path: Path, field: str
     path.write_text("print('ok')\n", encoding="utf-8")
     result = runner.read_window_tool({"cwd": str(tmp_path), "path": "sample.py", field: 0})
     assert result.ok is False
-    assert result.payload == {"error": "invalid_request", "message": f"{field} must be >= 1", "hint": "Pass a positive integer."}
+    assert result.payload == {
+        "error": "invalid_request",
+        "message": f"{field} must be >= 1",
+        "hint": "Pass a positive integer.",
+    }
+
+
+def test_unicode_separators_preserved_for_exact_patch(tmp_path: Path) -> None:
+    """U+2028/U+2029/NEL/form-feed stay inside cursor windows for exact old_text."""
+    from cluxion_agentplugin_supercoder.core.hash_patch import apply_patch, file_hash
+
+    text = "alpha\u2028keep\nbeta\u2029x\x0cform\x85nel\ngamma\n"
+    path = tmp_path / "sep.py"
+    path.write_text(text, encoding="utf-8")
+    window = read_window(tmp_path, "sep.py", start_line=1, max_lines=10)
+    assert "\u2028" in window.content
+    assert "\u2029" in window.content
+    assert "\x0c" in window.content
+    assert "\x85" in window.content
+    # EOF line-count: LF-only (+1 when non-empty), not splitlines()'s extra breaks.
+    assert window.end_line == text.count("\n") + (1 if text else 0)
+    # Window-copied old_text must exact-match (no fuzzy rewrite of separators).
+    old_text = window.content + ("\n" if not window.content.endswith("\n") else "")
+    result = apply_patch(path, old_text=old_text, new_text="replaced\n", expected_file_hash=file_hash(text))
+    assert result.success is True
+    assert result.strategy == "exact"
+    assert path.read_text(encoding="utf-8") == "replaced\n"

@@ -432,6 +432,186 @@ def test_concurrent_patches_no_lost_update_stress(tmp_path: Path) -> None:
             assert f"# UNIQUE_PATCH_{i}_START" not in final
 
 
+def test_lock_dir_is_uid_scoped(tmp_path: Path) -> None:
+    path = tmp_path / "a.py"
+    path.write_text("x = 1\n", encoding="utf-8")
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    lock = hp._lock_path(path)
+    assert lock.parent.name == f"cluxion-supercoder-locks-{os.geteuid()}"
+    # Opening the exclusive lock must create a validated 0700 owner dir + 0600 file.
+    with hp._exclusive_lock(path):
+        assert lock.parent.is_dir()
+        assert lock.is_file()
+        assert (lock.parent.stat().st_mode & 0o777) == 0o700
+        assert (lock.stat().st_mode & 0o777) == 0o600
+        assert lock.parent.stat().st_uid == os.geteuid()
+        assert lock.stat().st_uid == os.geteuid()
+
+
+def test_lock_dir_wrong_owner_mode_does_not_chmod_or_thread_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stat as statmod
+
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    if hp.fcntl is None:
+        pytest.skip("fcntl required for POSIX lock validation path")
+
+    unsafe = tmp_path / f"cluxion-supercoder-locks-{os.geteuid()}"
+    unsafe.mkdir(mode=0o755)
+    mode_before = statmod.S_IMODE(unsafe.stat().st_mode)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    target = tmp_path / "t.py"
+    target.write_text("x=1\n", encoding="utf-8")
+    with pytest.raises(OSError), hp._exclusive_lock(target):
+        pass
+    assert statmod.S_IMODE(unsafe.stat().st_mode) == mode_before
+    assert list(unsafe.iterdir()) == []
+
+
+def test_exclusive_lock_fails_closed_when_race_honest_flags_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    if hp.fcntl is None:
+        pytest.skip("fcntl required for flag-unavailable fail-closed path")
+
+    monkeypatch.setattr(hp, "_dir_open_flags", lambda: None)
+    monkeypatch.setattr(hp, "_file_open_flags", lambda create: None)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    target = tmp_path / "t.py"
+    target.write_text("x=1\n", encoding="utf-8")
+    with pytest.raises(OSError), hp._exclusive_lock(target):
+        pass
+    lock_dir = tmp_path / f"cluxion-supercoder-locks-{os.geteuid()}"
+    # Must not create path-level lock files when flags are unavailable.
+    assert not lock_dir.exists() or list(lock_dir.iterdir()) == []
+
+
+def test_lock_dir_symlink_fails_closed_without_touching_victim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    if hp.fcntl is None:
+        pytest.skip("fcntl required for POSIX lock validation path")
+
+    victim = tmp_path / "victim_lock_dir"
+    victim.mkdir(mode=0o700)
+    marker = victim / "keep.txt"
+    marker.write_text("safe\n", encoding="utf-8")
+    link = tmp_path / f"cluxion-supercoder-locks-{os.geteuid()}"
+    link.symlink_to(victim)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    target = tmp_path / "t.py"
+    target.write_text("x=1\n", encoding="utf-8")
+    with pytest.raises(OSError), hp._exclusive_lock(target):
+        pass
+    assert marker.read_text(encoding="utf-8") == "safe\n"
+    assert list(victim.iterdir()) == [marker]
+    assert link.is_symlink()
+
+
+def test_lock_file_symlink_fails_closed_without_touching_victim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    if hp.fcntl is None:
+        pytest.skip("fcntl required for POSIX lock validation path")
+
+    lock_dir = tmp_path / f"cluxion-supercoder-locks-{os.geteuid()}"
+    lock_dir.mkdir(mode=0o700)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    target = tmp_path / "t.py"
+    target.write_text("x=1\n", encoding="utf-8")
+    victim = tmp_path / "victim.lockdata"
+    victim.write_text("DO_NOT_CLOBBER\n", encoding="utf-8")
+    os.chmod(victim, 0o600)
+    lock_path = hp._lock_path(target)
+    lock_path.symlink_to(victim)
+    with pytest.raises(OSError), hp._exclusive_lock(target):
+        pass
+    assert victim.read_text(encoding="utf-8") == "DO_NOT_CLOBBER\n"
+    assert lock_path.is_symlink()
+
+
+def _multiprocess_lock_child(path_str: str, tmp_str: str, ready, acquired) -> None:
+    """Spawn-safe worker for same-UID multiprocess lock exclusion."""
+    import tempfile as tf
+
+    import cluxion_agentplugin_supercoder.core.hash_patch as child_hp
+
+    tf.gettempdir = lambda: tmp_str  # type: ignore[method-assign]
+    ready.put("ready")
+    with child_hp._exclusive_lock(Path(path_str)):
+        acquired.put("held")
+
+
+def test_same_uid_real_multiprocess_exclusion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """fcntl.flock must exclude a second process (not just threads) for the same UID."""
+    import multiprocessing as mp
+    import queue
+
+    import cluxion_agentplugin_supercoder.core.hash_patch as hp
+
+    if hp.fcntl is None:
+        pytest.skip("fcntl required for real multiprocess exclusion")
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    target = tmp_path / "t.py"
+    target.write_text("x=1\n", encoding="utf-8")
+    path_str = str(target)
+    tmp_str = str(tmp_path)
+
+    ctx = mp.get_context("spawn")
+    ready: mp.Queue = ctx.Queue()
+    acquired: mp.Queue = ctx.Queue()
+    proc = ctx.Process(target=_multiprocess_lock_child, args=(path_str, tmp_str, ready, acquired))
+    with hp._exclusive_lock(target):
+        proc.start()
+        assert ready.get(timeout=5) == "ready"
+        with pytest.raises(queue.Empty):
+            acquired.get(timeout=0.4)
+    assert acquired.get(timeout=5) == "held"
+    proc.join(timeout=5)
+    assert proc.exitcode == 0
+
+
+def test_post_image_field_is_exact_commit_string(tmp_path: Path) -> None:
+    from cluxion_agentplugin_supercoder import runner
+
+    path = tmp_path / "a.py"
+    secret = "SECRET_MARKER_POST_IMAGE_MUST_STAY_PRIVATE\n"
+    path.write_text("alpha\nbeta\n", encoding="utf-8")
+    result = apply_patch(path, old_text="beta\n", new_text=secret)
+    assert result.success is True
+    assert result._post_image == f"alpha\n{secret}"
+    assert result.post_hash == file_hash(result._post_image)
+    # Private / non-repr: secret must not leak via repr.
+    assert secret.strip() not in repr(result)
+    assert "_post_image" not in repr(result) or secret.strip() not in repr(result)
+    # External ToolResult payload must not carry the post-image string.
+    path.write_text("alpha\nbeta\n", encoding="utf-8")
+    tool = runner.patch_tool(
+        {
+            "cwd": str(tmp_path),
+            "path": "a.py",
+            "old_text": "beta\n",
+            "new_text": secret,
+            "expected_file_hash": file_hash("alpha\nbeta\n"),
+            "syntax_gate": False,
+            "lint_gate": False,
+        }
+    )
+    assert tool.ok is True
+    payload_text = repr(tool.payload)
+    assert secret.strip() not in payload_text
+    assert "post_image" not in tool.payload
+    assert "_post_image" not in tool.payload
+
+
 def test_atomic_write_interruption_leaves_original_intact(tmp_path: Path) -> None:
     """Simulated mid-write crash leaves ORIGINAL file intact (temp may remain, no truncate)."""
     path = tmp_path / "atomic_test.txt"

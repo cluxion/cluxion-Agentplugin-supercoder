@@ -39,8 +39,15 @@ pub fn outline(payload: &Value) -> Result<Value, IndexError> {
         })
         .unwrap_or_default();
 
+    // Hash of the exact content this backend parsed (cache correctness for the Python side).
+    let content_hash = crate::file_hash(&content);
+
     // JSON parses but has no symbols worth mapping; treat like no grammar.
-    let grammar = if language == "json" { None } else { grammar_for(&language) };
+    let grammar = if language == "json" {
+        None
+    } else {
+        grammar_for(&language)
+    };
     let Some(grammar) = grammar else {
         return Ok(json!({
             "ok": true,
@@ -49,6 +56,7 @@ pub fn outline(payload: &Value) -> Result<Value, IndexError> {
             "reason": "no_outline",
             "symbols": [],
             "symbol_count": 0,
+            "content_hash": content_hash,
         }));
     };
 
@@ -68,12 +76,19 @@ pub fn outline(payload: &Value) -> Result<Value, IndexError> {
         "language": language,
         "symbols": symbols,
         "symbol_count": symbols.len(),
+        "content_hash": content_hash,
     }))
 }
 
 /// Walk one container level: module items at depth 0, class/impl/mod
 /// members at depth 1. Deeper nesting is deliberately not mapped.
-fn collect_level(container: Node<'_>, source: &str, language: &str, depth: usize, out: &mut Vec<Value>) {
+fn collect_level(
+    container: Node<'_>,
+    source: &str,
+    language: &str,
+    depth: usize,
+    out: &mut Vec<Value>,
+) {
     let mut cursor = container.walk();
     for child in container.children(&mut cursor) {
         if out.len() >= MAX_SYMBOLS {
@@ -95,12 +110,8 @@ fn collect_level(container: Node<'_>, source: &str, language: &str, depth: usize
 /// Unwrap transparent wrappers (decorators, exports) to the inner definition.
 fn unwrap_wrapper(node: Node<'_>) -> Node<'_> {
     match node.kind() {
-        "decorated_definition" => node
-            .child_by_field_name("definition")
-            .unwrap_or(node),
-        "export_statement" => node
-            .child_by_field_name("declaration")
-            .unwrap_or(node),
+        "decorated_definition" => node.child_by_field_name("definition").unwrap_or(node),
+        "export_statement" => node.child_by_field_name("declaration").unwrap_or(node),
         _ => node,
     }
 }
@@ -141,7 +152,10 @@ fn member_container<'tree>(node: &Node<'tree>, language: &str) -> Option<Node<'t
     let expected = match (language, node.kind()) {
         ("python", "class_definition") => "block",
         ("rust", "impl_item" | "trait_item") => "declaration_list",
-        ("javascript" | "typescript" | "tsx", "class_declaration" | "abstract_class_declaration") => "class_body",
+        (
+            "javascript" | "typescript" | "tsx",
+            "class_declaration" | "abstract_class_declaration",
+        ) => "class_body",
         _ => return None,
     };
     node.child_by_field_name("body")
@@ -159,7 +173,12 @@ fn symbol_entry(node: &Node<'_>, source: &str, kind: &str, depth: usize) -> Valu
         .utf8_text(source.as_bytes())
         .ok()
         .and_then(|text| text.lines().next())
-        .map(|line| line.trim().chars().take(SIGNATURE_MAX_CHARS).collect::<String>())
+        .map(|line| {
+            line.trim()
+                .chars()
+                .take(SIGNATURE_MAX_CHARS)
+                .collect::<String>()
+        })
         .unwrap_or_default();
     json!({
         "kind": kind,
@@ -219,7 +238,12 @@ mod tests {
         let found = symbols(src, "typescript");
         let pairs: Vec<(String, String)> = found
             .iter()
-            .map(|s| (s["kind"].as_str().unwrap().into(), s["name"].as_str().unwrap().into()))
+            .map(|s| {
+                (
+                    s["kind"].as_str().unwrap().into(),
+                    s["name"].as_str().unwrap().into(),
+                )
+            })
             .collect();
         assert!(pairs.contains(&("interface".into(), "Props".into())));
         assert!(pairs.contains(&("class".into(), "View".into())));
@@ -230,7 +254,10 @@ mod tests {
 
     #[test]
     fn signature_is_first_line_trimmed() {
-        let found = symbols("def add(a: int,\n        b: int) -> int:\n    return a + b\n", "python");
+        let found = symbols(
+            "def add(a: int,\n        b: int) -> int:\n    return a + b\n",
+            "python",
+        );
         assert_eq!(found[0]["signature"], "def add(a: int,");
     }
 

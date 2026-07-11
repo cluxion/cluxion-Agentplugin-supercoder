@@ -37,11 +37,13 @@ def test_repo_map_counts_only_when_cap_reached(tmp_path: Path, monkeypatch) -> N
 
 
 def test_patch_lock_lives_outside_the_workspace(tmp_path: Path) -> None:
+    import os
+
     target = tmp_path / "module.py"
     target.write_text("x = 1\n", encoding="utf-8")
     lock = hash_patch._lock_path(target)
     assert not str(lock).startswith(str(tmp_path))
-    assert lock.parent.name == "cluxion-supercoder-locks"
+    assert lock.parent.name == f"cluxion-supercoder-locks-{os.geteuid()}"
 
 
 def test_native_import_is_lazy() -> None:

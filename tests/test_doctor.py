@@ -398,7 +398,7 @@ def test_cycle97_high_probes_registered_and_pass():
         catalog_path=cat,
         probes=PROBES,
         plugin="supercoder",
-        version="0.2.43",
+        version="0.2.44",
     )
     statuses = {c.check_id: c.status for c in result.checks}
     for check_id in _CYCLE97_HIGH:
@@ -422,7 +422,7 @@ def test_missing_high_probe_marks_degraded():
         catalog_path=_catalog_path(),
         probes=partial,
         plugin="supercoder",
-        version="0.2.43",
+        version="0.2.44",
     )
     statuses = {c.check_id: c.status for c in result.checks}
     for check_id in _CYCLE97_HIGH:
@@ -596,7 +596,7 @@ def test_json_error_handling_comprehensive_fails_on_invalid_output(monkeypatch):
 
     monkeypatch.setattr(
         "cluxion_agentplugin_supercoder.plugin._wrap",
-        lambda _cb: (lambda _args: "not-json{"),
+        lambda _cb: lambda _args: "not-json{",
     )
     status, detail = probes_mod.json_error_handling_comprehensive(_doctor_ctx())
     assert status == "fail"
@@ -619,7 +619,7 @@ def test_cycle97_probe_exception_fails_not_skips(monkeypatch):
         catalog_path=_catalog_path(),
         probes={"backend_chain_operational": probes_mod.backend_chain_operational},
         plugin="supercoder",
-        version="0.2.43",
+        version="0.2.44",
     )
     statuses = {c.check_id: c.status for c in result.checks}
     assert statuses["backend_chain_operational"] == "fail"

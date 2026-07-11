@@ -204,13 +204,13 @@ def test_runner_tool_wraps_result(backend: str, sample_repo: Path) -> None:
 
 def _counting_outline_wrapper(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     calls = {"count": 0}
-    real_outline_file = repo_map.outline_file
+    real = repo_map._outline_file_result
 
-    def counting_outline(path: Path, *, language: str | None = None) -> list[dict]:
+    def counting_outline(path: Path, *, language: str | None = None) -> dict:
         calls["count"] += 1
-        return real_outline_file(path, language=language)
+        return real(path, language=language)
 
-    monkeypatch.setattr(repo_map, "outline_file", counting_outline)
+    monkeypatch.setattr(repo_map, "_outline_file_result", counting_outline)
     return calls
 
 
@@ -221,8 +221,12 @@ def test_second_build_reuses_outline_cache(backend: str, sample_repo: Path, monk
 
     calls["count"] = 0
     second = repo_map.build_repo_map(sample_repo)
-    assert calls["count"] == 0
-    assert first == second
+    if backend == "python":
+        # checked=false rust outlines are never cached; only python symbols stick.
+        assert calls["count"] == 1
+    else:
+        assert calls["count"] == 0
+    assert first["map"] == second["map"]
 
 
 def test_changed_file_invalidates_outline_cache(
@@ -237,7 +241,11 @@ def test_changed_file_invalidates_outline_cache(
         encoding="utf-8",
     )
     result = repo_map.build_repo_map(sample_repo)
-    assert calls["count"] == 1
+    if backend == "python":
+        # app.py (hash miss) + engine.rs (never cached on python tier)
+        assert calls["count"] == 2
+    else:
+        assert calls["count"] == 1
     assert "class RenamedService:4" in result["map"]
     assert "method boot:5" in result["map"]
 
@@ -253,8 +261,82 @@ def test_identical_rewrite_keeps_outline_cache(
 
     calls["count"] = 0
     result = repo_map.build_repo_map(sample_repo)
-    assert calls["count"] == 0
+    if backend == "python":
+        # checked=false rust outlines are never cached.
+        assert calls["count"] == 1
+    else:
+        assert calls["count"] == 0
     assert "map" in result
+
+
+def test_outline_runtimeerror_and_timeout_fallback_to_py_outline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    (tmp_path / "app.py").write_text("def keep():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "lib.rs").write_text("fn main() {}\n", encoding="utf-8")
+    monkeypatch.setattr(rust_bridge, "resolve_backend", lambda: "subprocess")
+
+    def boom(_command: str, _payload: dict[str, object]) -> dict[str, object]:
+        raise RuntimeError("backend down")
+
+    monkeypatch.setattr(rust_bridge, "_invoke_subprocess", boom)
+    symbols = repo_map.outline_file(tmp_path / "app.py")
+    assert any(s.get("name") == "keep" for s in symbols)
+    assert repo_map.outline_file(tmp_path / "lib.rs") == []
+
+    def timed_out(_command: str, _payload: dict[str, object]) -> dict[str, object]:
+        raise subprocess.TimeoutExpired(cmd="supercoder-index", timeout=30)
+
+    monkeypatch.setattr(rust_bridge, "_invoke_subprocess", timed_out)
+    symbols = repo_map.outline_file(tmp_path / "app.py")
+    assert any(s.get("name") == "keep" for s in symbols)
+    assert repo_map.outline_file(tmp_path / "lib.rs") == []
+
+
+def test_outline_cache_skips_hash_race(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from cluxion_agentplugin_supercoder.core.hash_patch import file_hash
+
+    path = tmp_path / "app.py"
+    original = "def one():\n    return 1\n"
+    path.write_text(original, encoding="utf-8")
+    scan_hash = file_hash(original)
+    real = repo_map._outline_file_result
+
+    def raced(p: Path, *, language: str | None = None) -> dict:
+        result = real(p, language=language)
+        # Pretend the backend parsed different bytes than the scan snapshot.
+        result = dict(result)
+        result["content_hash"] = "0" * 64
+        return result
+
+    monkeypatch.setattr(repo_map, "_outline_file_result", raced)
+    symbols, cached = repo_map._outline_for_map_entry(path, language="python", file_hash=scan_hash)
+    assert symbols  # still returned for this call
+    assert cached is False
+    assert (str(path), scan_hash) not in repo_map._outline_cache
+
+
+def test_python_to_native_outline_cache_switch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A python-tier [] for Rust must not hide native symbols after backend switch."""
+    if "native" not in BACKENDS:
+        pytest.skip("native backend unavailable")
+    path = tmp_path / "engine.rs"
+    path.write_text("pub struct Engine;\n\nimpl Engine {\n    pub fn run(&self) {}\n}\n", encoding="utf-8")
+    from cluxion_agentplugin_supercoder.core.hash_patch import file_hash
+
+    digest = file_hash(path.read_text(encoding="utf-8"))
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "python")
+    empty, _ = repo_map._outline_for_map_entry(path, language="rust", file_hash=digest)
+    assert empty == []
+    assert (str(path), digest) not in repo_map._outline_cache
+
+    monkeypatch.setenv(rust_bridge.INDEX_BACKEND_ENV, "native")
+    symbols, _ = repo_map._outline_for_map_entry(path, language="rust", file_hash=digest)
+    pairs = {(s["kind"], s["name"]) for s in symbols}
+    assert ("struct", "Engine") in pairs
+    assert ("method", "run") in pairs
 
 
 def test_python_scan_excludes_file_symlinks_and_external_symbol_leak(

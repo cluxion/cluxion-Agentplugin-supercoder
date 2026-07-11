@@ -157,7 +157,9 @@ def patch_tool(payload: Mapping[str, object]) -> ToolResult:
         "similarity": result.similarity,
     }
     if result.success and bool(payload.get("syntax_gate", True)):
-        check = syntax_gate.check_source(path=target)
+        # Verdict must use this patch's exact post-image; path only selects language.
+        # Disk may already differ if a concurrent writer landed between commit and gate.
+        check = syntax_gate.check_source(path=target, content=result._post_image)
         body["syntax"] = {key: check[key] for key in ("checked", "language", "valid", "error_count")}
         if check["checked"] and not check["valid"]:
             # L1 gate: the patch broke the file's syntax. Roll the file back

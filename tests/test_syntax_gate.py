@@ -263,3 +263,112 @@ def test_malformed_native_schema_still_reverts_invalid_patch(tmp_path: Path, mon
     assert result.ok is False
     assert result.payload["strategy"] == "syntax_reverted"
     assert (tmp_path / "mod.py").read_text(encoding="utf-8") == original
+
+
+def test_syntax_verdict_uses_post_image_not_later_writer(tmp_path: Path, monkeypatch) -> None:
+    """Concurrent writer must not rewrite this patch's syntax verdict."""
+    path = tmp_path / "mod.py"
+    original = "def add(a, b):\n    return a + b\n"
+    later_writer = "def later():\n    return 99\n"
+    path.write_text(original, encoding="utf-8")
+    real_check = syntax_gate.check_source
+    seen: dict[str, object] = {}
+
+    def interleave(*args, **kwargs):
+        path.write_text(later_writer, encoding="utf-8")
+        seen["kwargs"] = dict(kwargs)
+        if args:
+            seen["args"] = args
+        return real_check(*args, **kwargs)
+
+    monkeypatch.setattr(syntax_gate, "check_source", interleave)
+    result = runner.patch_tool(
+        {
+            "cwd": str(tmp_path),
+            "path": "mod.py",
+            "old_text": "    return a + b\n",
+            "new_text": "    return a +\n",
+            "expected_file_hash": file_hash(original),
+        }
+    )
+    assert result.ok is False
+    assert result.payload["strategy"] == "revert_failed"
+    assert path.read_text(encoding="utf-8") == later_writer
+    assert result.payload["syntax"]["valid"] is False
+    assert result.payload["syntax_errors"]
+    # Path may select language, but content must be the committed post-image.
+    kwargs = seen.get("kwargs") or {}
+    assert "content" in kwargs
+    assert kwargs["content"] == "def add(a, b):\n    return a +\n"
+
+
+def test_python_module_return_and_duplicate_args_rejected(backend: str) -> None:
+    for content in ("return 1\n", "def f(a, a):\n    pass\n"):
+        result = syntax_gate.check_source(content=content, language="python")
+        assert result["checked"] is True
+        assert result["valid"] is False
+        assert result["error_count"] >= 1
+
+
+def test_json_rejects_empty_multi_root_and_non_rfc_constants(backend: str) -> None:
+    for content in ("", "{}{}", "NaN", "Infinity", "-Infinity", '{"x": NaN}'):
+        result = syntax_gate.check_source(content=content, language="json")
+        assert result["checked"] is True
+        assert result["valid"] is False, content
+        assert result["error_count"] >= 1
+        assert result["errors"][0]["kind"] == "error"
+        assert isinstance(result["errors"][0]["message"], str)
+        assert result["errors"][0]["message"]
+
+
+def test_json_non_rfc_constant_points_past_quoted_and_escaped_tokens() -> None:
+    """Diagnostics must locate the unquoted constant, not an earlier string match."""
+    # Lines 1-3: quoted/escaped decoys; line 4: real invalid NaN.
+    content = '{\n  "note": "contains NaN text",\n  "escaped": "has \\"NaN\\" inside",\n  "value": NaN\n}\n'
+    result = syntax_gate.check_source(content=content, language="json")
+    assert result["valid"] is False
+    err = result["errors"][0]
+    assert "NaN" in err["message"]
+    assert err["line"] == 4
+    assert err["column"] == content.split("\n")[3].index("NaN") + 1
+    assert "value" in err["snippet"]
+
+    # Quoted Infinity before real -Infinity on a later line.
+    content2 = '{\n  "a": "Infinity",\n  "b": -Infinity\n}\n'
+    result2 = syntax_gate.check_source(content=content2, language="json")
+    assert result2["valid"] is False
+    err2 = result2["errors"][0]
+    assert "Infinity" in err2["message"]
+    assert err2["line"] == 3
+    assert err2["column"] == content2.split("\n")[2].index("-Infinity") + 1
+
+
+def test_python_json_stdlib_tier_even_when_native_forced(monkeypatch) -> None:
+    """Public python/json truth is backend-independent (stdlib tier)."""
+    calls: list[str] = []
+
+    def boom(command: str, payload: dict[str, object]) -> dict[str, object]:
+        calls.append(command)
+        raise AssertionError(f"native must not run for python/json: {command}")
+
+    monkeypatch.setattr(rust_bridge, "resolve_backend", lambda: "native")
+    monkeypatch.setattr(rust_bridge, "_invoke_native", boom)
+    assert syntax_gate.check_source(content="def f():\n    return 1\n", language="python")["valid"] is True
+    assert syntax_gate.check_source(content='{"a": 1}', language="json")["valid"] is True
+    assert syntax_gate.check_source(content="return 1\n", language="python")["valid"] is False
+    assert syntax_gate.check_source(content="NaN", language="json")["valid"] is False
+    assert calls == []
+
+
+def test_syntax_finding_snippet_uses_lf_only_line_semantics() -> None:
+    # U+2028 must stay inside the line; splitlines() would invent a break.
+    content = "x = 1\ny = 'a\u2028b'\nz = (\n"
+    result = syntax_gate.check_source(content=content, language="python")
+    assert result["valid"] is False
+    snippet = result["errors"][0]["snippet"]
+    assert "\u2028" in snippet or result["errors"][0]["line"] >= 1
+    # Snippet extraction must not rewrite separators into LF-only multi-lines.
+    lines = content.split("\n")
+    line_no = result["errors"][0]["line"]
+    if 0 < line_no <= len(lines):
+        assert result["errors"][0]["snippet"] == lines[line_no - 1][:120]

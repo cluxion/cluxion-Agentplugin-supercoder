@@ -91,6 +91,11 @@ fn scan_repo(payload: &Value) -> Result<Value, IndexError> {
     let mut candidates: Vec<String> = WalkDir::new(root)
         .into_iter()
         .filter_entry(|entry| {
+            // SKIP_DIRS only below depth 0 so a root named target/dist/.venv is scanned
+            // (matches the Python tier, which skips within-tree parts only).
+            if entry.depth() == 0 {
+                return true;
+            }
             !(entry.file_type().is_dir()
                 && entry
                     .file_name()
