@@ -33,7 +33,10 @@ def test_root_plugin_artifacts_are_version_synced() -> None:
     assert fallback is not None and fallback.group(1) == version
     assert Path("commands/supercoder.md").is_file()
     assert Path("commands/supercoder-doctor.md").is_file()
-    assert Path("skills/supercoder/SKILL.md").is_file()
+    skill_path = Path("skills/clx-supercoder/SKILL.md")
+    assert skill_path.is_file()
+    assert yaml.safe_load(skill_path.read_text(encoding="utf-8").split("---", 2)[1])["name"] == CANONICAL_PLUGIN_ID
+    assert not Path("skills/supercoder").exists()
 
 
 def test_per_surface_adapter_forks_are_removed() -> None:

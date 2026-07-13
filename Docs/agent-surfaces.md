@@ -16,7 +16,7 @@ Files:
 
 - `.codex-plugin/plugin.json`
 - `commands/`
-- `skills/supercoder/SKILL.md`
+- `skills/clx-supercoder/SKILL.md`
 
 No `[plugins.<name>] command = [...]` schema exists.
 
@@ -26,7 +26,7 @@ Claude Code uses the same root layout:
 
 - `.claude-plugin/plugin.json`
 - `commands/`
-- `skills/supercoder/SKILL.md`
+- `skills/clx-supercoder/SKILL.md`
 
 ## Hermes
 

@@ -1,6 +1,6 @@
 {
   "name": "clx-supercoder",
-  "version": "0.2.50",
+  "version": "0.2.51",
   "description": "Universal agent coding harness plugin: cursor logic, safe patch, line budget, Rust index, and test gates.",
   "author": {
     "name": "cluxion"

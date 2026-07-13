@@ -1,6 +1,6 @@
 ---
-name: supercoder
-description: Hash-verified patch discipline for coding tasks — bounded reads, ambiguity-refusing patches, syntax rollback, lint/test gates, and an evidence brief. Auto-load only for non-trivial code writing, refactoring, or bug fixes, especially multi-file, unfamiliar-codebase, or correctness-critical edits. Do not auto-load for fully specified one-value patches, including UI/style/token changes such as margin 8px→12px, even though they edit code; handle them directly. Explicit /supercoder or named supercoder requests always invoke it. Skip non-code work.
+name: clx-supercoder
+description: Hash-verified patch discipline for coding tasks — bounded reads, ambiguity-refusing patches, syntax rollback, lint/test gates, and an evidence brief. Auto-load only for non-trivial code writing, refactoring, or bug fixes, especially multi-file, unfamiliar-codebase, or correctness-critical edits. Do not auto-load for fully specified one-value patches, including UI/style/token changes such as margin 8px→12px, even though they edit code; handle them directly. Explicit /supercoder or named clx-supercoder requests always invoke it. Skip non-code work.
 ---
 
 # Cluxion Supercoder

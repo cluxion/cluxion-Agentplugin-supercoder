@@ -17,7 +17,7 @@ stdin:
 {"prompt":"$ARGUMENTS","cwd":"$PWD"}
 ```
 
-Use the JSON contract to decide whether the task is a coding task. If `mode` is `coding_queue`, read `${CLAUDE_PLUGIN_ROOT}/skills/supercoder/SKILL.md` and follow its Supercoder workflow (including the failure paths) before editing.
+Use the JSON contract to decide whether the task is a coding task. If `mode` is `coding_queue`, read `${CLAUDE_PLUGIN_ROOT}/skills/clx-supercoder/SKILL.md` and follow its Supercoder workflow (including the failure paths) before editing.
 
 Other JSON contracts (hashes in outputs are bare 64-char sha256 hex; hash inputs also accept a `sha256:` prefix):
 
